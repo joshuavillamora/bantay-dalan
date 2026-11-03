@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BANTAY-DALAN</title>
+<link rel="stylesheet" href="style.css"></head><body>
+<header><h1>BANTAY-DALAN</h1><p>Road Network Resilience and Essential Services Accessibility Analysis — Iloilo City (simulation model, Iloilo City only)</p></header>
+<main>
+<section>
+ <div class="card">
+  <h2>Road network and disaster simulation</h2>
+  <div class="row">
+   <button data-sc="flood">Flood: Iloilo River area</button>
+   <button data-sc="slide">Arterial / bridge failure</button>
+   <label>Random closures <input id="pct" type="range" min="5" max="60" value="25" style="width:90px;padding:0"> <span id="pv">25%</span></label>
+   <button data-sc="rand">Apply random</button>
+   <button data-sc="clear">Reset to normal</button>
+  </div>
+  <svg id="map" viewBox="0 0 800 680"></svg>
+  <div class="legend"><span><i style="border-color:var(--rt)"></i>Street</span><span><i style="border-color:var(--mu)"></i>Arterial road</span><span><i style="border-color:var(--bl);opacity:.4"></i>Iloilo River</span><span><i style="border-color:var(--rd);border-top-style:dashed"></i>Closed road (click any road to toggle)</span><span><i style="border-color:var(--bl)"></i>Route after closures</span><span><i style="border-color:var(--am);border-top-style:dotted"></i>Normal route</span><span>● community &nbsp;H hospital &nbsp;E evacuation center</span></div>
+ </div>
+ <div class="card">
+  <h2>Algorithm performance comparison (same graph, same pairs)</h2>
+  <div class="row"><button class="p" id="bench">Run benchmark</button><span class="note" id="bn">All communities × all essential facilities, 8 repetitions each.</span></div>
+  <div class="wrap"><table id="bt"></table></div>
+ </div>
+</section>
+<section>
+ <div class="card">
+  <h2>Alternative route finder</h2>
+  <div class="row"><label>From</label><select id="org"></select><label>To nearest</label><select id="ft"><option value="h">Hospital</option><option value="e">Evacuation center</option></select><label>Algorithm</label><select id="alg"><option value="dij">Dijkstra</option><option value="ast">A*</option><option value="bid">Bidirectional Dijkstra</option></select></div>
+  <div id="route"></div>
+ </div>
+ <div class="card"><h2>Before vs after summary</h2><div class="kpis" id="kpi"></div></div>
+ <div class="card"><h2>Affected communities</h2><div class="wrap"><table id="ct"></table></div>
+  <p class="note">Distances in km from community to nearest facility. “Partial” = one facility type unreachable or a detour of more than 25%. The street grid is a generated model placed at approximate Iloilo City district locations (not real OSM data), with hypothetical closures; it does not predict real disasters or certify real-world road safety.</p></div>
+</section>
+</main>
+<script src="script.js"></script></body></html>
