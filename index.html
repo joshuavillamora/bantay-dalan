@@ -1,38 +1,44 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>BANTAY-DALAN</title>
-<link rel="stylesheet" href="style.css"></head><body>
-<header><h1>BANTAY-DALAN</h1><p>Road Network Resilience and Essential Services Accessibility Analysis — Iloilo City (simulation model, Iloilo City only)</p></header>
-<main>
-<section>
- <div class="card">
-  <h2>Road network and disaster simulation</h2>
-  <div class="row">
-   <button data-sc="flood">Flood: Iloilo River area</button>
-   <button data-sc="slide">Arterial / bridge failure</button>
-   <label>Random closures <input id="pct" type="range" min="5" max="60" value="25" style="width:90px;padding:0"> <span id="pv">25%</span></label>
-   <button data-sc="rand">Apply random</button>
-   <button data-sc="clear">Reset to normal</button>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iloilo Pathfinding Visualizer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside>
+  <div><h1>Iloilo Pathfinding Visualizer</h1><p class="sub">Pick two places on Iloilo's real road network and watch each algorithm search for a route.</p></div>
+  <div><label for="from">From</label><select id="from"></select></div>
+  <div><label for="to">To</label><select id="to"></select></div>
+  <p class="hint">Or click the map: first click sets the start, second sets the destination.</p>
+  <div><label for="algo">Algorithm</label><select id="algo"></select><p class="hint" id="info" style="margin-top:6px"></p></div>
+  <div><label>Optimize for</label>
+    <div class="seg"><button id="mFast" class="on" type="button">Fastest</button><button id="mShort" type="button">Shortest</button></div></div>
+  <div><label for="spd">Speed</label><input id="spd" type="range" min="0" max="100" value="60"></div>
+  <div class="row"><button id="go" type="button">Visualize</button><button id="pause" class="ghost" type="button" disabled>Pause</button></div>
+  <div class="row"><button id="step" class="ghost" type="button" disabled>Step</button><button id="skip" class="ghost" type="button" disabled>Skip to end</button><button id="reset" class="ghost" type="button">Reset</button></div>
+  <div class="row"><button id="swap" class="ghost" type="button">Swap</button><button id="gps" class="ghost" type="button">Use my location</button></div>
+  <div id="msg" role="status"></div>
+  <div id="live">
+    <b id="lt">Ready</b>
+    <div class="stats">
+      <span>Roads explored</span><span id="sN">0</span>
+      <span>Waiting in line</span><span id="sQ">0</span>
+      <span>Distance</span><span id="sD">–</span>
+      <span>Travel time</span><span id="sT">–</span>
+    </div>
+    <p class="hint"><i class="sw ex"></i> explored &nbsp; <i class="sw fr"></i> found, not yet explored &nbsp; <i class="sw pa"></i> final route</p>
   </div>
-  <svg id="map" viewBox="0 0 800 680"></svg>
-  <div class="legend"><span><i style="border-color:var(--rt)"></i>Street</span><span><i style="border-color:var(--mu)"></i>Arterial road</span><span><i style="border-color:var(--bl);opacity:.4"></i>Iloilo River</span><span><i style="border-color:var(--rd);border-top-style:dashed"></i>Closed road (click any road to toggle)</span><span><i style="border-color:var(--bl)"></i>Route after closures</span><span><i style="border-color:var(--am);border-top-style:dotted"></i>Normal route</span><span>● community &nbsp;H hospital &nbsp;E evacuation center</span></div>
- </div>
- <div class="card">
-  <h2>Algorithm performance comparison (same graph, same pairs)</h2>
-  <div class="row"><button class="p" id="bench">Run benchmark</button><span class="note" id="bn">All communities × all essential facilities, 8 repetitions each.</span></div>
-  <div class="wrap"><table id="bt"></table></div>
- </div>
-</section>
-<section>
- <div class="card">
-  <h2>Alternative route finder</h2>
-  <div class="row"><label>From</label><select id="org"></select><label>To nearest</label><select id="ft"><option value="h">Hospital</option><option value="e">Evacuation center</option></select><label>Algorithm</label><select id="alg"><option value="dij">Dijkstra</option><option value="ast">A*</option><option value="bid">Bidirectional Dijkstra</option></select></div>
-  <div id="route"></div>
- </div>
- <div class="card"><h2>Before vs after summary</h2><div class="kpis" id="kpi"></div></div>
- <div class="card"><h2>Affected communities</h2><div class="wrap"><table id="ct"></table></div>
-  <p class="note">Distances in km from community to nearest facility. “Partial” = one facility type unreachable or a detour of more than 25%. The street grid is a generated model placed at approximate Iloilo City district locations (not real OSM data), with hypothetical closures; it does not predict real disasters or certify real-world road safety.</p></div>
-</section>
-</main>
-<script src="script.js"></script></body></html>
+  <div id="resBox" hidden>
+    <label>Comparison (same start and destination)</label>
+    <table><thead><tr><th>Algorithm</th><th>Explored</th><th>Dist.</th><th>Time</th></tr></thead><tbody id="res"></tbody></table>
+    <p class="hint">✓ marks the best route so far. Run another algorithm to compare.</p>
+  </div>
+</aside>
+<main><div id="map" aria-label="Map of Iloilo City"></div></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
