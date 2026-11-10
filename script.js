@@ -11,7 +11,10 @@ const PLACES = {
   "Iloilo Airport (Cabatuan)":[10.8330,122.4930]
 };
 
-const map = L.map('map').setView([10.7050,122.5600],13);
+const map = L.map('map',{zoomControl:false}).setView([10.7050,122.5600],13);
+L.control.zoom({position:'topright'}).addTo(map);   // the control panel covers the top-left corner
+// Padding that keeps a fitted route clear of the floating control panel on wide screens.
+const fitPad=()=>innerWidth>760?{paddingTopLeft:[document.getElementById('panel').offsetWidth+56,60],paddingBottomRight:[60,60]}:{padding:[40,40]};
 // PLACE YOUR API KEY HERE
 const CARTO_API_KEY = "";
 if (CARTO_API_KEY) {
@@ -34,46 +37,105 @@ const ALGOS={
   bfs:{name:'Breadth-first',info:'Explores ring by ring, counting road segments and ignoring distance. Finds the fewest segments, not the shortest or fastest route.'},
   dfs:{name:'Depth-first',info:'Dives down one road as far as it can, then backs up. Finds a route, but usually a long and winding one.'}
 };
-const fromSel=$('from'), toSel=$('to'), algoSel=$('algo');
-const opts=Object.keys(PLACES).map(k=>`<option>${k}</option>`).join('');
-fromSel.innerHTML='<option value="">Choose start…</option>'+opts;
-toSel.innerHTML='<option value="">Choose destination…</option>'+opts;
-fromSel.value="Plaza Libertad (City Proper)";
-toSel.value="SM City Iloilo";
+const fromIn=$('from'), toIn=$('to'), algoSel=$('algo');
 algoSel.innerHTML=Object.entries(ALGOS).map(([k,v])=>`<option value="${k}">${v.name}</option>`).join('');
 const showInfo=()=>$('info').textContent=ALGOS[algoSel.value].info;
 algoSel.onchange=showInfo;showInfo();
 
 let start=null,end=null,mode='fast',mS=null,mE=null,clickState=0,graph=null,loading=false,run=null,paused=false,raf=null,pathRaf=null,pathLine=null,pathCase=null,head=null,runId=0,results=[];
+const names={s:'',e:''};   // the text shown in the From / To boxes for the chosen points
 const icon=c=>L.divIcon({className:'',html:`<div class="dot" style="background:${c}"></div>`,iconSize:[16,16],iconAnchor:[8,8]});
 const msg=t=>$('msg').textContent=t||'';
 const fmtT=s=>s>=3600?`${Math.floor(s/3600)} h ${Math.round(s%3600/60)} min`:`${Math.max(1,Math.round(s/60))} min`;
 const fmtD=m=>m>=1000?(m/1000).toFixed(1)+' km':Math.round(m)+' m';
 
 function setPt(which,ll,name){
-  if(which==='s'){start=ll;if(mS)mS.remove();mS=L.marker(ll,{icon:icon('#16a34a')}).addTo(map).bindTooltip('Start: '+name);}
-  else{end=ll;if(mE)mE.remove();mE=L.marker(ll,{icon:icon('#dc2626')}).addTo(map).bindTooltip('Destination: '+name);}
+  if(which==='s'){start=ll;if(mS)mS.remove();mS=L.marker(ll,{icon:icon('#16a34a')}).addTo(map).bindTooltip('Start: '+name);fromIn.value=name;}
+  else{end=ll;if(mE)mE.remove();mE=L.marker(ll,{icon:icon('#dc2626')}).addTo(map).bindTooltip('Destination: '+name);toIn.value=name;}
+  names[which]=name;
   results=[];renderResults();
 }
-function fromSelects(){
-  if(PLACES[fromSel.value])setPt('s',PLACES[fromSel.value],fromSel.value);
-  if(PLACES[toSel.value])setPt('e',PLACES[toSel.value],toSel.value);
-}
-fromSel.onchange=toSel.onchange=fromSelects;
-fromSelects();
+setPt('s',PLACES["Plaza Libertad (City Proper)"],"Plaza Libertad (City Proper)");
+setPt('e',PLACES["SM City Iloilo"],"SM City Iloilo");
 map.on('click',e=>{
   const ll=[e.latlng.lat,e.latlng.lng];
-  if(clickState===0){setPt('s',ll,'Pinned point');fromSel.value='';clickState=1;}
-  else{setPt('e',ll,'Pinned point');toSel.value='';clickState=0;}
+  if(clickState===0){setPt('s',ll,'Pinned point');clickState=1;}
+  else{setPt('e',ll,'Pinned point');clickState=0;}
 });
-$('swap').onclick=()=>{[fromSel.value,toSel.value]=[toSel.value,fromSel.value];const a=start,b=end;if(b)setPt('s',b,'Start');if(a)setPt('e',a,'Destination');};
+$('swap').onclick=()=>{$('swap').classList.toggle('flipped');const a=start,an=names.s,b=end,bn=names.e;if(b)setPt('s',b,bn);if(a)setPt('e',a,an);};
 $('gps').onclick=()=>{
   if(!navigator.geolocation){msg('Geolocation is not supported in this browser.');return;}
-  navigator.geolocation.getCurrentPosition(p=>{setPt('s',[p.coords.latitude,p.coords.longitude],'My location');fromSel.value='';map.panTo([p.coords.latitude,p.coords.longitude]);},
+  navigator.geolocation.getCurrentPosition(p=>{setPt('s',[p.coords.latitude,p.coords.longitude],'My location');map.panTo([p.coords.latitude,p.coords.longitude]);},
     ()=>msg('Could not get your location. Allow location access and try again.'));
 };
 $('mFast').onclick=()=>{mode='fast';$('mFast').classList.add('on');$('mShort').classList.remove('on');};
 $('mShort').onclick=()=>{mode='short';$('mShort').classList.add('on');$('mFast').classList.remove('on');};
+
+/* ---------- location search with suggestions ----------
+   Preset places match instantly. Other places in and around Iloilo come from Photon
+   (photon.komoot.io), a free OpenStreetMap search service that supports search-as-you-type. */
+const SEARCH_BOX='122.38,10.62,122.66,10.88';   // west,south,east,north: Iloilo City out to the airport
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function placeSearch(input,which){
+  const list=$(input.id+'List');let items=[],active=-1,timer=null,ctrl=null,seq=0;
+  const open=v=>{list.hidden=!v;input.setAttribute('aria-expanded',v);if(!v){active=-1;input.removeAttribute('aria-activedescendant');}};
+  const render=(loading)=>{
+    if(!items.length&&!loading){list.innerHTML=input.value.trim()?'<li class="empty">No places found in Iloilo.</li>':'';open(!!input.value.trim());return;}
+    list.innerHTML=items.map((p,i)=>`<li role="option" id="${input.id}Opt${i}" class="opt${i===active?' active':''}" aria-selected="${i===active}" data-i="${i}">
+      <span class="ico ${p.preset?'star':'pin'}" aria-hidden="true"></span><span><b>${esc(p.name)}</b><small>${esc(p.detail)}</small></span></li>`).join('')
+      +(loading?'<li class="empty">Searching…</li>':'');
+    open(true);
+  };
+  const local=q=>Object.entries(PLACES).filter(([n])=>!q||n.toLowerCase().includes(q)).map(([n,ll])=>({name:n,ll,detail:'Popular place',preset:true}));
+  const remote=async q=>{
+    if(ctrl)ctrl.abort();ctrl=new AbortController();
+    const r=await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7&lat=10.71&lon=122.56&bbox=${SEARCH_BOX}`,{signal:ctrl.signal});
+    if(!r.ok)throw new Error(r.status);
+    const d=await r.json();
+    return d.features.filter(f=>f.properties.name||f.properties.street).map(f=>{
+      const p=f.properties,c=f.geometry.coordinates;
+      const name=p.name||[p.housenumber,p.street].filter(Boolean).join(' ');
+      const detail=[p.name&&p.street,p.locality||p.district,p.city||p.county].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
+      return {name,ll:[c[1],c[0]],detail:detail||'Iloilo'};
+    });
+  };
+  const update=()=>{
+    const q=input.value.trim().toLowerCase(),my=++seq;
+    items=local(q);active=items.length?0:-1;
+    clearTimeout(timer);
+    if(q.length<3){render(false);return;}
+    render(true);
+    timer=setTimeout(async()=>{
+      try{
+        const found=await remote(q);
+        if(my!==seq)return;
+        const seen=new Set(items.map(p=>p.name.toLowerCase()));
+        items=items.concat(found.filter(p=>!seen.has(p.name.toLowerCase()))).slice(0,8);
+      }catch(e){if(e.name==='AbortError'||my!==seq)return;}
+      if(active<0&&items.length)active=0;
+      render(false);
+    },300);
+  };
+  const choose=i=>{
+    const p=items[i];if(!p)return;
+    setPt(which,p.ll,p.name);open(false);
+    if(!map.getBounds().contains(p.ll))map.panTo(p.ll);
+  };
+  const move=d=>{if(!items.length)return;active=(active+d+items.length)%items.length;render(false);
+    const el=$(input.id+'Opt'+active);if(el){input.setAttribute('aria-activedescendant',el.id);el.scrollIntoView({block:'nearest'});}};
+  input.addEventListener('focus',()=>{input.select();seq++;clearTimeout(timer);items=local('');active=-1;render(false);});
+  input.addEventListener('input',update);
+  input.addEventListener('keydown',e=>{
+    if(e.key==='ArrowDown'){e.preventDefault();list.hidden?update():move(1);}
+    else if(e.key==='ArrowUp'){e.preventDefault();move(-1);}
+    else if(e.key==='Enter'){if(!list.hidden&&active>=0){e.preventDefault();choose(active);}}
+    else if(e.key==='Escape'){open(false);input.value=names[which];}
+  });
+  input.addEventListener('blur',()=>setTimeout(()=>{open(false);input.value=names[which];},150));
+  list.addEventListener('mousedown',e=>{const li=e.target.closest('[data-i]');if(li){e.preventDefault();choose(+li.dataset.i);input.blur();}});
+}
+placeSearch(fromIn,'s');
+placeSearch(toIn,'e');
 
 /* ---------- canvas layer: explored roads (lines) and found roads (dots) ---------- */
 const Explore=L.Layer.extend({
@@ -196,7 +258,7 @@ $('go').onclick=async()=>{
   if(!start||!end){msg('Choose both a start and a destination.');return;}
   const my=runId,algo=algoSel.value,md=mode;
   loading=true;ui();$('lt').textContent='Downloading road network…';
-  map.fitBounds([start,end],{padding:[70,70]});
+  map.fitBounds([start,end],fitPad());
   let g;
   try{g=await loadGraph();}
   catch(e){if(my===runId){msg('Could not load road data ('+e.message+'). Check your connection and try again in a moment.');$('lt').textContent='Ready';loading=false;ui();}return;}
@@ -252,3 +314,12 @@ function renderResults(){
   const best={};results.forEach(r=>{best[r.mode]=Math.min(best[r.mode]??Infinity,metric(r));});
   $('res').innerHTML=results.map(r=>`<tr><td>${r.name}<br><small>${r.mode==='fast'?'fastest':'shortest'}</small></td><td>${r.n.toLocaleString()}</td><td>${fmtD(r.dist)}</td><td>${fmtT(r.time)}${metric(r)<=best[r.mode]*1.0001?' ✓':''}</td></tr>`).join('');
 }
+
+/* ---------- welcome card: shown on first visit, reopened with the ? button ---------- */
+const welcome=$('welcome');
+const showWelcome=v=>{welcome.hidden=!v;if(v)$('wGo').focus();};
+$('wGo').onclick=()=>{showWelcome(false);try{localStorage.setItem('bd-welcomed','1');}catch(e){}};
+$('help').onclick=()=>showWelcome(welcome.hidden);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!welcome.hidden)$('wGo').click();});
+let seen=false;try{seen=localStorage.getItem('bd-welcomed')==='1';}catch(e){}
+showWelcome(!seen);

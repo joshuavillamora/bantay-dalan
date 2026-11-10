@@ -3,41 +3,129 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Iloilo Pathfinding Visualizer</title>
+<title>Bantay Dalan · Iloilo Pathfinding Visualizer</title>
+<meta name="description" content="Watch search algorithms find routes through Iloilo's real road network.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect x='7' y='7' width='26' height='26' rx='4' transform='rotate(45 20 20)' fill='%23ffc83d' stroke='%2316181d' stroke-width='2.5'/%3E%3Cpath d='M14 26c0-6 12-6 12-12' fill='none' stroke='%2316181d' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='14' cy='26' r='2.6' fill='%2316181d'/%3E%3Ccircle cx='26' cy='14' r='2.6' fill='%2316181d'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=DM+Sans:opsz,wght@9..40,400..700&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<aside>
-  <div><h1>Iloilo Pathfinding Visualizer</h1><p class="sub">Pick two places on Iloilo's real road network and watch each algorithm search for a route.</p></div>
-  <div><label for="from">From</label><select id="from"></select></div>
-  <div><label for="to">To</label><select id="to"></select></div>
-  <p class="hint">Or click the map: first click sets the start, second sets the destination.</p>
-  <div><label for="algo">Algorithm</label><select id="algo"></select><p class="hint" id="info" style="margin-top:6px"></p></div>
-  <div><label>Optimize for</label>
-    <div class="seg"><button id="mFast" class="on" type="button">Fastest</button><button id="mShort" type="button">Shortest</button></div></div>
-  <div><label for="spd">Speed</label><input id="spd" type="range" min="0" max="100" value="60"></div>
-  <div class="row"><button id="go" type="button">Visualize</button><button id="pause" class="ghost" type="button" disabled>Pause</button></div>
-  <div class="row"><button id="step" class="ghost" type="button" disabled>Step</button><button id="skip" class="ghost" type="button" disabled>Skip to end</button><button id="reset" class="ghost" type="button">Reset</button></div>
-  <div class="row"><button id="swap" class="ghost" type="button">Swap</button><button id="gps" class="ghost" type="button">Use my location</button></div>
-  <div id="msg" role="status"></div>
-  <div id="live">
-    <b id="lt">Ready</b>
-    <div class="stats">
-      <span>Roads explored</span><span id="sN">0</span>
-      <span>Waiting in line</span><span id="sQ">0</span>
-      <span>Distance</span><span id="sD">–</span>
-      <span>Travel time</span><span id="sT">–</span>
+<aside id="panel">
+  <header class="brand">
+    <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="7" y="7" width="26" height="26" rx="4" transform="rotate(45 20 20)" fill="#ffc83d" stroke="#16181d" stroke-width="2.5"/>
+      <path d="M14 26c0-6 12-6 12-12" fill="none" stroke="#16181d" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="14" cy="26" r="2.6" fill="#16181d"/>
+      <circle cx="26" cy="14" r="2.6" fill="#16181d"/>
+    </svg>
+    <div class="brand-text">
+      <h1>Bantay Dalan</h1>
+      <p class="kicker">Iloilo · Pathfinding visualizer</p>
     </div>
-    <p class="hint"><i class="sw ex"></i> explored &nbsp; <i class="sw fr"></i> found, not yet explored &nbsp; <i class="sw pa"></i> final route</p>
-  </div>
-  <div id="resBox" hidden>
-    <label>Comparison (same start and destination)</label>
-    <table><thead><tr><th>Algorithm</th><th>Explored</th><th>Dist.</th><th>Time</th></tr></thead><tbody id="res"></tbody></table>
-    <p class="hint">✓ marks the best route so far. Run another algorithm to compare.</p>
-  </div>
+    <button id="help" class="icon-btn" type="button" aria-label="About Bantay Dalan" title="About">?</button>
+  </header>
+
+  <section class="group">
+    <h2><span class="num">01</span>Route</h2>
+    <div class="trip">
+      <span class="connector" aria-hidden="true"></span>
+      <div class="leg">
+        <i class="node start" aria-hidden="true"></i>
+        <label for="from" class="sr">From</label>
+        <div class="search"><input id="from" type="text" placeholder="Starting point" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="fromList"><ul id="fromList" class="suggest" role="listbox" aria-label="Start suggestions" hidden></ul></div>
+      </div>
+      <div class="leg">
+        <i class="node end" aria-hidden="true"></i>
+        <label for="to" class="sr">To</label>
+        <div class="search"><input id="to" type="text" placeholder="Destination" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="toList"><ul id="toList" class="suggest" role="listbox" aria-label="Destination suggestions" hidden></ul></div>
+      </div>
+      <button id="swap" class="icon-btn swap" type="button" aria-label="Swap start and destination" title="Swap"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4v15M4 8l4-4 4 4M16 20V5M12 16l4 4 4-4"/></svg></button>
+    </div>
+    <div class="route-extra">
+      <button id="gps" class="link-btn" type="button">◎ Use my location</button>
+      <span class="hint">or click the map to drop pins</span>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2><span class="num">02</span>Algorithm</h2>
+    <div class="select-wrap"><select id="algo" aria-label="Algorithm"></select></div>
+    <p class="info" id="info"></p>
+    <div class="seg" role="group" aria-label="Optimize for"><button id="mFast" class="on" type="button">Fastest</button><button id="mShort" type="button">Shortest</button></div>
+  </section>
+
+  <section class="group">
+    <h2><span class="num">03</span>Run</h2>
+    <div class="speed">
+      <label for="spd">Speed</label>
+      <input id="spd" type="range" min="0" max="100" value="60">
+    </div>
+    <button id="go" class="primary" type="button">Visualize route <span aria-hidden="true">→</span></button>
+    <div class="controls">
+      <button id="pause" type="button" disabled>Pause</button>
+      <button id="step" type="button" disabled>Step</button>
+      <button id="skip" type="button" disabled>Skip</button>
+      <button id="reset" type="button">Reset</button>
+    </div>
+    <div id="msg" role="status"></div>
+  </section>
+
+  <section id="live" class="dash">
+    <div class="dash-top"><span class="pulse" aria-hidden="true"></span><b id="lt">Ready</b></div>
+    <div class="stats">
+      <div class="stat"><span>Roads explored</span><b id="sN">0</b></div>
+      <div class="stat"><span>Waiting in line</span><b id="sQ">0</b></div>
+      <div class="stat"><span>Distance</span><b id="sD">–</b></div>
+      <div class="stat"><span>Travel time</span><b id="sT">–</b></div>
+    </div>
+    <ul class="legend">
+      <li><i class="sw ex"></i>Explored</li>
+      <li><i class="sw fr"></i>Found, not yet explored</li>
+      <li><i class="sw pa"></i>Final route</li>
+    </ul>
+  </section>
+
+  <section id="resBox" class="group" hidden>
+    <h2><span class="num">04</span>Comparison</h2>
+    <p class="hint">Same start and destination. ✓ marks the best route so far.</p>
+    <div class="table-wrap">
+      <table><thead><tr><th>Algorithm</th><th>Explored</th><th>Dist.</th><th>Time</th></tr></thead><tbody id="res"></tbody></table>
+    </div>
+  </section>
+
+  <footer class="foot">Road data © OpenStreetMap contributors</footer>
 </aside>
-<main><div id="map" aria-label="Map of Iloilo City"></div></main>
+
+<main>
+  <div id="map" aria-label="Map of Iloilo City"></div>
+</main>
+
+<div id="welcome" class="welcome" role="dialog" aria-modal="true" aria-labelledby="wTitle" hidden>
+  <div class="welcome-card">
+    <svg class="welcome-art" viewBox="0 0 520 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <rect width="520" height="120" fill="#1d2026"/>
+      <path d="M-10 92C90 92 120 30 220 30S350 96 440 70 530 30 540 30" fill="none" stroke="#2f343d" stroke-width="30" stroke-linecap="round"/>
+      <path d="M-10 92C90 92 120 30 220 30S350 96 440 70 530 30 540 30" fill="none" stroke="#ffc83d" stroke-width="2.5" stroke-dasharray="12 10"/>
+      <g fill="#f08c00" opacity=".9"><circle cx="150" cy="58" r="3"/><circle cx="175" cy="42" r="3"/><circle cx="262" cy="44" r="3"/><circle cx="300" cy="66" r="3"/></g>
+      <circle cx="58" cy="90" r="9" fill="#16a34a" stroke="#fff" stroke-width="3"/>
+      <circle cx="440" cy="70" r="9" fill="#dc2626" stroke="#fff" stroke-width="3"/>
+    </svg>
+    <div class="welcome-body">
+      <p class="kicker">Welcome to</p>
+      <h2 id="wTitle">Bantay Dalan</h2>
+      <p class="lead"><em>Bantay dalan</em> means “watch the road.” See how computers find a route through Iloilo’s real streets, one road at a time.</p>
+      <ol class="steps">
+        <li><span class="step-num">1</span><div><b>Pick two places</b><span>Search by name or click the map.</span></div></li>
+        <li><span class="step-num">2</span><div><b>Choose an algorithm</b><span>A*, Dijkstra, Greedy, BFS, or DFS.</span></div></li>
+        <li><span class="step-num">3</span><div><b>Press Visualize</b><span>Watch the search spread, then compare.</span></div></li>
+      </ol>
+      <button id="wGo" class="primary" type="button">Start exploring <span aria-hidden="true">→</span></button>
+    </div>
+  </div>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="script.js"></script>
 </body>
