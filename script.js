@@ -106,12 +106,18 @@ setDrawing(false);   // set starting hint text
 /*road segment is closed when it crosses a closure line */
 const ccw=(a,b,c)=>(c[0]-a[0])*(b[1]-a[1])>(b[0]-a[0])*(c[1]-a[1]);
 const crosses=(p,q,r,s)=>ccw(p,r,s)!==ccw(q,r,s)&&ccw(p,q,r)!==ccw(p,q,s);
-function openRoads(g){  
+function openRoads(g){
   if(!closures.length)return g;
+  let removed=0;
   const adj=g.adj.map((list,u)=>{
     const p=[g.lat[u],g.lng[u]];
-    return list.filter(e=>!closures.some(c=>crosses(p,[g.lat[e[0]],g.lng[e[0]]],c.a,c.b)));
+    return list.filter(e=>{
+      const bad=closures.some(c=>crosses(p,[g.lat[e[0]],g.lng[e[0]]],c.a,c.b));
+      if(bad)removed++;
+      return !bad;
+    });
   });
+  console.log('closed road segments:',removed);
   return {lat:g.lat,lng:g.lng,adj,b:g.b,major:g.major};
 }
 
@@ -224,10 +230,12 @@ class Heap{
 /* ---------- road network from OpenStreetMap (Overpass) ---------- */
 const SPEED={motorway:80,trunk:60,primary:50,secondary:40,tertiary:35,unclassified:30,residential:25,living_street:15,motorway_link:40,trunk_link:35,primary_link:30,secondary_link:30,tertiary_link:30};
 async function loadGraph(){
-  const S=Math.min(start[0],end[0]),N=Math.max(start[0],end[0]),W=Math.min(start[1],end[1]),E=Math.max(start[1],end[1]);
+    const lats=[start[0],end[0]],lngs=[start[1],end[1]];
+  closures.forEach(c=>{lats.push(c.a[0],c.b[0]);lngs.push(c.a[1],c.b[1]);});
+  const S=Math.min(...lats),N=Math.max(...lats),W=Math.min(...lngs),E=Math.max(...lngs);
   const span=Math.max(N-S,E-W),major=span>0.06,pad=Math.max(0.008,span*0.15);
   const inside=(g,p)=>p[0]>g.b[0]+.002&&p[0]<g.b[2]-.002&&p[1]>g.b[1]+.002&&p[1]<g.b[3]-.002;
-  if(graph&&graph.major===major&&inside(graph,start)&&inside(graph,end))return graph;
+    if(graph&&graph.major===major&&inside(graph,[S,W])&&inside(graph,[N,E]))return graph;
   const b=[S-pad,W-pad,N+pad,E+pad];
   const types=Object.keys(SPEED).filter(t=>!major||!/residential|living_street|unclassified/.test(t)).join('|');
   const q=`[out:json][timeout:60];way["highway"~"^(${types})$"]["access"!~"private|no"](${b.join(',')});out geom;`;
@@ -313,7 +321,7 @@ $('go').onclick=async()=>{
   loading=true;ui();$('lt').textContent='Downloading road network…';
   map.fitBounds([start,end],fitPad());
   let g;
-  try{g=await loadGraph();}
+  try{g=openRoads(await loadGraph());}
   catch(e){if(my===runId){msg('Could not load road data ('+e.message+'). Check your connection and try again in a moment.');$('lt').textContent='Ready';loading=false;ui();}return;}
   if(my!==runId)return;
   loading=false;
