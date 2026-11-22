@@ -257,3 +257,15 @@ td:not(:first-child){font-family:var(--mono);font-weight:500;font-size:.76rem}
   .steps li{flex-direction:row;align-items:flex-start;gap:14px;padding:12px}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- road closures ---------- */
+.closure-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.outline-btn{
+  border:1.5px solid var(--line);background:var(--raise);border-radius:10px;padding:9px 14px;
+  font-size:.86rem;font-weight:600;transition:border-color .15s,background .15s;
+}
+.outline-btn:hover{border-color:var(--ink)}
+.outline-btn.on{background:var(--end);border-color:var(--end);color:#fff}
+.leaflet-container.drawing,.leaflet-container.drawing .leaflet-interactive{cursor:crosshair}
+path.closure{stroke:var(--end);stroke-width:6px;stroke-linecap:round}
+path.closure.draft{stroke-dasharray:2 10}
