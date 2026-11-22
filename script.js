@@ -229,35 +229,31 @@ class Heap{
 
 /* ---------- road network from OpenStreetMap (Overpass) ---------- */
 const SPEED={motorway:80,trunk:60,primary:50,secondary:40,tertiary:35,unclassified:30,residential:25,living_street:15,motorway_link:40,trunk_link:35,primary_link:30,secondary_link:30,tertiary_link:30};
-async function loadGraph(){
-    const lats=[start[0],end[0]],lngs=[start[1],end[1]];
-  closures.forEach(c=>{lats.push(c.a[0],c.b[0]);lngs.push(c.a[1],c.b[1]);});
-  const S=Math.min(...lats),N=Math.max(...lats),W=Math.min(...lngs),E=Math.max(...lngs);
-  const span=Math.max(N-S,E-W),major=span>0.06,pad=Math.max(0.008,span*0.15);
-  const inside=(g,p)=>p[0]>g.b[0]+.002&&p[0]<g.b[2]-.002&&p[1]>g.b[1]+.002&&p[1]<g.b[3]-.002;
-    if(graph&&graph.major===major&&inside(graph,[S,W])&&inside(graph,[N,E]))return graph;
-  const b=[S-pad,W-pad,N+pad,E+pad];
-  const types=Object.keys(SPEED).filter(t=>!major||!/residential|living_street|unclassified/.test(t)).join('|');
-  const q=`[out:json][timeout:60];way["highway"~"^(${types})$"]["access"!~"private|no"](${b.join(',')});out geom;`;
-  const r=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:'data='+encodeURIComponent(q)});
-  if(!r.ok)throw new Error('road data server returned '+r.status);
-  const d=await r.json();
-  const idx=new Map(),lat=[],lng=[],adj=[];
-  const node=(id,la,lo)=>{let i=idx.get(id);if(i===undefined){i=lat.length;idx.set(id,i);lat.push(la);lng.push(lo);adj.push([]);}return i;};
-  for(const w of d.elements){
-    if(w.type!=='way'||!w.geometry)continue;
-    const t=w.tags||{},sp=SPEED[t.highway]||25;
-    const ow=t.oneway==='-1'?-1:(['yes','true','1'].includes(t.oneway)||t.junction==='roundabout')?1:0;
-    let prev=-1;
-    for(let k=0;k<w.nodes.length;k++){
-      const p=w.geometry[k];if(!p){prev=-1;continue;}
-      const c=node(w.nodes[k],p.lat,p.lon);
-      if(prev>=0){const dd=hav(lat[prev],lng[prev],lat[c],lng[c]);if(ow>=0)adj[prev].push([c,dd,sp]);if(ow<=0)adj[c].push([prev,dd,sp]);}
-      prev=c;
+let graphPromise = null;
+async function loadGraph() {
+  if (graph) return graph;
+  if (!graphPromise) graphPromise = (async () => {
+    const r = await fetch('iloilo-roads.json');
+    if (!r.ok) throw new Error('iloilo-roads.json not found (' + r.status + ')');
+    const d = await r.json();
+    const idx = new Map(), lat = [], lng = [], adj = [];
+    const node = (id, la, lo) => { let i = idx.get(id); if (i === undefined) { i = lat.length; idx.set(id, i); lat.push(la); lng.push(lo); adj.push([]); } return i; };
+    for (const w of d.elements) {
+      if (w.type !== 'way' || !w.geometry) continue;
+      const t = w.tags || {}, sp = SPEED[t.highway] || 25;
+      const ow = t.oneway === '-1' ? -1 : (['yes', 'true', '1'].includes(t.oneway) || t.junction === 'roundabout') ? 1 : 0;
+      let prev = -1;
+      for (let k = 0; k < w.nodes.length; k++) {
+        const p = w.geometry[k]; if (!p) { prev = -1; continue; }
+        const c = node(w.nodes[k], p.lat, p.lon);
+        if (prev >= 0) { const dd = hav(lat[prev], lng[prev], lat[c], lng[c]); if (ow >= 0) adj[prev].push([c, dd, sp]); if (ow <= 0) adj[c].push([prev, dd, sp]); }
+        prev = c;
+      }
     }
-  }
-  graph={lat,lng,adj,b,major};
-  return graph;
+    graph = { lat, lng, adj, b: null, major: false };
+    return graph;
+  })();
+  try { return await graphPromise; } catch (e) { graphPromise = null; throw e; }
 }
 function nearest(g,p){let best=-1,bd=Infinity;for(let i=0;i<g.lat.length;i++){if(!g.adj[i].length)continue;const d=hav(p[0],p[1],g.lat[i],g.lng[i]);if(d<bd){bd=d;best=i;}}return{i:best,d:bd};}
 
