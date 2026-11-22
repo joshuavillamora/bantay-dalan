@@ -37,13 +37,14 @@ const ALGOS={
   bfs:{name:'Breadth-first',info:'Explores ring by ring, counting road segments and ignoring distance. Finds the fewest segments, not the shortest or fastest route.'},
   dfs:{name:'Depth-first',info:'Dives down one road as far as it can, then backs up. Finds a route, but usually a long and winding one.'},
   bidir:{name:'Bidirectional Dijkstra',info:'Runs Dijkstra from the start and from the destination at the same time, and stops when the two searches meet. Finds the same best route as Dijkstra but explores far fewer roads.'},
+  lpa:{name:'LPA*',info:'Lifelong Planning A*. Searches like A* the first time, but remembers what it learned. Draw or remove a road closure afterwards and it repairs only the part that changed instead of starting over.'},
 };
 const fromIn=$('from'), toIn=$('to'), algoSel=$('algo');
 algoSel.innerHTML=Object.entries(ALGOS).map(([k,v])=>`<option value="${k}">${v.name}</option>`).join('');
 const showInfo=()=>$('info').textContent=ALGOS[algoSel.value].info;
-algoSel.onchange=showInfo;showInfo();
+algoSel.onchange=()=>{lpa=null;showInfo();};showInfo();
 
-let start=null,end=null,mode='fast',mS=null,mE=null,clickState=0,graph=null,loading=false,run=null,paused=false,raf=null,pathRaf=null,pathLine=null,pathCase=null,head=null,runId=0,results=[];
+let start=null,end=null,mode='fast',mS=null,mE=null,clickState=0,graph=null,loading=false,run=null,paused=false,raf=null,pathRaf=null,pathLine=null,pathCase=null,head=null, lpa=null, runId=0,results=[];
 const names={s:'',e:''};   // the text shown in the From / To boxes for the chosen points
 const icon=c=>L.divIcon({className:'',html:`<div class="dot" style="background:${c}"></div>`,iconSize:[16,16],iconAnchor:[8,8]});
 const msg=t=>$('msg').textContent=t||'';
@@ -55,6 +56,7 @@ function setPt(which,ll,name){
   else{end=ll;if(mE)mE.remove();mE=L.marker(ll,{icon:icon('#dc2626')}).addTo(map).bindTooltip('Destination: '+name);toIn.value=name;}
   names[which]=name;
   results=[];renderResults();
+  lpa=null;
 }
 setPt('s',PLACES["Plaza Libertad (City Proper)"],"Plaza Libertad (City Proper)");
 setPt('e',PLACES["SM City Iloilo"],"SM City Iloilo");
@@ -70,9 +72,10 @@ map.on('click',e=>{
 let closures=[],drawing=false,corner=null,draft=null;
 const HINT='Draw a red line across a road to close it. Click a line to reopen it.';
 function closuresChanged(){
-  cancel();clearDrawing();results=[];renderResults();msg('');
   $('closeClear').disabled=!closures.length;
   $('closeDraw').textContent='Close a road'+(closures.length?` (${closures.length})`:'');
+  if(algoSel.value==='lpa'&&lpa&&lpa.ready){replanLPA();return;}   // repair, keep results
+  lpa=null;cancel();clearDrawing();results=[];renderResults();msg('');
 }
 function setDrawing(v){
   drawing=v;corner=null;if(draft){draft.remove();draft=null;}
@@ -128,8 +131,8 @@ $('gps').onclick=()=>{
   navigator.geolocation.getCurrentPosition(p=>{setPt('s',[p.coords.latitude,p.coords.longitude],'My location');map.panTo([p.coords.latitude,p.coords.longitude]);},
     ()=>msg('Could not get your location. Allow location access and try again.'));
 };
-$('mFast').onclick=()=>{mode='fast';$('mFast').classList.add('on');$('mShort').classList.remove('on');};
-$('mShort').onclick=()=>{mode='short';$('mShort').classList.add('on');$('mFast').classList.remove('on');};
+$('mFast').onclick=()=>{mode='fast';$('mFast').classList.add('on');$('mShort').classList.remove('on'); lpa=null};
+$('mShort').onclick=()=>{mode='short';$('mShort').classList.add('on');$('mFast').classList.remove('on'); lpa=null};
 
 /* ---------- location search with suggestions ----------
    Preset places match instantly. Other places in and around Iloilo come from Photon
@@ -297,9 +300,82 @@ function* bidir(g,s,t,mode){
   return path;
 }
 
+/* ---------- LPA* ---------- */
+class Heap2{    // two-part keys [k1,k2]; stale entries are skipped via stamps
+  constructor(){this.a=[];this.b=[];this.v=[];this.s=[];}
+  get size(){return this.v.length;}
+  lt(i,j){return this.a[i]<this.a[j]||(this.a[i]===this.a[j]&&this.b[i]<this.b[j]);}
+  swap(i,j){for(const x of [this.a,this.b,this.v,this.s]){const t=x[i];x[i]=x[j];x[j]=t;}}
+  push(v,a,b,s){this.a.push(a);this.b.push(b);this.v.push(v);this.s.push(s);let i=this.v.length-1;
+    while(i>0){const p=(i-1)>>1;if(!this.lt(i,p))break;this.swap(i,p);i=p;}}
+  pop(){const last=this.v.length-1;this.swap(0,last);const r=this.v.pop();this.a.pop();this.b.pop();this.s.pop();
+    const m=this.v.length;let i=0;for(;;){let c=2*i+1;if(c>=m)break;if(c+1<m&&this.lt(c+1,c))c++;if(!this.lt(c,i))break;this.swap(i,c);i=c;}return r;}
+}
+function blockedSet(g){   // directed edges (u*n+v) that cross a closure line
+  const n=g.lat.length,set=new Set();
+  if(!closures.length)return set;
+  g.adj.forEach((list,u)=>{const p=[g.lat[u],g.lng[u]];
+    for(const e of list){const q=[g.lat[e[0]],g.lng[e[0]]];if(closures.some(c=>crosses(p,q,c.a,c.b)))set.add(u*n+e[0]);}});
+  return set;
+}
+function lpaInit(g,s,t,mode){
+  const n=g.lat.length,L={g,s,t,mode,n,ready:false,
+    G:new Float64Array(n).fill(Infinity),rhs:new Float64Array(n).fill(Infinity),
+    stamp:new Int32Array(n),inQ:new Uint8Array(n),heap:new Heap2(),radj:buildRadj(g),blocked:blockedSet(g)};
+  const h=v=>hav(g.lat[v],g.lng[v],g.lat[t],g.lng[t])/(mode==='fast'?80/3.6:1);
+  const w=(d,sp)=>mode==='fast'?d/(sp/3.6):d;
+  const k2=v=>Math.min(L.G[v],L.rhs[v]),k1=v=>k2(v)+h(v);
+  const bestPred=v=>{let best=Infinity,bp=-1;
+    for(const [p,d,sp] of L.radj[v]){if(L.blocked.has(p*n+v))continue;const c=L.G[p]+w(d,sp);if(c<best){best=c;bp=p;}}
+    return [best,bp];};
+  L.update=v=>{   // UpdateVertex: returns true if v just became reachable
+    let fresh=false;
+    if(v!==s){const [best]=bestPred(v);if(L.rhs[v]===Infinity&&best<Infinity)fresh=true;L.rhs[v]=best;}
+    L.stamp[v]++;L.inQ[v]=0;
+    if(L.G[v]!==L.rhs[v]){L.inQ[v]=1;L.heap.push(v,k1(v),k2(v),L.stamp[v]);}
+    return fresh;
+  };
+  const top=()=>{const q=L.heap;while(q.size&&(q.s[0]!==L.stamp[q.v[0]]||!L.inQ[q.v[0]]))q.pop();return q.size?[q.a[0],q.b[0]]:[Infinity,Infinity];};
+  L.path=()=>{
+    if(L.G[t]===Infinity)return null;
+    const path=[t];let v=t,guard=0;
+    while(v!==s&&guard++<n){const bp=bestPred(v)[1];if(bp<0)return null;path.push(bp);v=bp;}
+    return v===s?path.reverse():null;
+  };
+  L.compute=function*(){   // ComputeShortestPath, one yield per expanded vertex
+    for(;;){
+      const [a,b]=top(),less=a<k1(t)||(a===k1(t)&&b<k2(t));
+      if(!(less||L.rhs[t]!==L.G[t])||!L.heap.size)break;
+      const u=L.heap.pop();L.inQ[u]=0;const found=[];let p=-1;
+      if(L.G[u]>L.rhs[u]){L.G[u]=L.rhs[u];p=bestPred(u)[1];
+        for(const e of g.adj[u])if(L.update(e[0]))found.push(e[0]);}
+      else{L.G[u]=Infinity;L.update(u);for(const e of g.adj[u])L.update(e[0]);}
+      yield{u,p,found,q:L.heap.size};
+    }
+    L.ready=true;return L.path();
+  };
+  return L;
+}
+function* lpaSearch(g,s,t,mode){
+  lpa=lpaInit(g,s,t,mode);lpa.rhs[s]=0;lpa.update(s);
+  return yield* lpa.compute();
+}
+function replanLPA(){   // a closure changed: repair the old search instead of restarting
+  const st=lpa,n=st.n,g=st.g,nb=blockedSet(g),touched=new Set();
+  for(const k of st.blocked)if(!nb.has(k))touched.add(k%n);   // road reopened
+  for(const k of nb)if(!st.blocked.has(k))touched.add(k%n);   // road newly closed
+  st.blocked=nb;touched.forEach(v=>st.update(v));
+  cancel();clearDrawing();msg('');
+  const my=runId;
+  head=L.marker([g.lat[st.s],g.lng[st.s]],{icon:L.divIcon({className:'',html:'<div class="head"></div>',iconSize:[14,14],iconAnchor:[7,7]}),interactive:false}).addTo(map);
+  run={g,it:st.compute(),count:0,acc:0,algo:'lpa',mode:st.mode,my,replan:true};
+  $('lt').textContent='LPA* is repairing the route…';ui();frame();
+}
+
 /* ---------- the algorithms, as one generator that yields one visited road at a time ---------- */
 function* search(g,s,t,algo,mode){
   if(algo==='bidir')return yield* bidir(g,s,t,mode);
+  if(algo==='lpa')return yield* lpaSearch(g,s,t,mode);
   const n=g.lat.length,cost=new Float64Array(n).fill(Infinity),prev=new Int32Array(n).fill(-1),done=new Uint8Array(n),seen=new Uint8Array(n);
   const hv=v=>hav(g.lat[v],g.lng[v],g.lat[t],g.lng[t])/(mode==='fast'?80/3.6:1);
   const key=(v,c)=>algo==='dijkstra'?c:algo==='astar'?c+hv(v):hv(v);
@@ -341,7 +417,7 @@ function clearDrawing(){
   layer.clear();[pathLine,pathCase,head].forEach(x=>x&&x.remove());pathLine=pathCase=head=null;
   $('sN').textContent='0';$('sQ').textContent='0';$('sD').textContent='–';$('sT').textContent='–';$('lt').textContent='Ready';
 }
-$('reset').onclick=()=>{cancel();clearDrawing();msg('');};
+$('reset').onclick=()=>{cancel();clearDrawing();msg(''); lpa=null};
 $('pause').onclick=()=>{
   if(!run)return;
   paused=!paused;
@@ -355,10 +431,10 @@ $('go').onclick=async()=>{
   cancel();clearDrawing();msg('');
   if(!start||!end){msg('Choose both a start and a destination.');return;}
   const my=runId,algo=algoSel.value,md=mode;
-  loading=true;ui();$('lt').textContent='Downloading road network…';
+  loading=true;ui();$('lt').textContent='Loading road network…';
   map.fitBounds([start,end],fitPad());
   let g;
-  try{g=openRoads(await loadGraph());}
+  try{const base=await loadGraph();g=algoSel.value==='lpa'?base:openRoads(base);}
   catch(e){if(my===runId){msg('Could not load road data ('+e.message+'). Check your connection and try again in a moment.');$('lt').textContent='Ready';loading=false;ui();}return;}
   if(my!==runId)return;
   loading=false;
@@ -395,7 +471,7 @@ function finish(g,path,r0){
   let dist=0,time=0;
   for(let k=1;k<path.length;k++){const e=g.adj[path[k-1]].find(x=>x[0]===path[k]);if(e){dist+=e[1];time+=e[1]/(e[2]/3.6);}}
   $('sD').textContent=fmtD(dist);$('sT').textContent=fmtT(time);$('lt').textContent='Route found';
-  results.push({name:ALGOS[r0.algo].name,mode:r0.mode,n:r0.count,dist,time});renderResults();
+  results.push({name:ALGOS[r0.algo].name+(r0.replan?' (replan)':''),mode:r0.mode,n:r0.count,dist,time});renderResults();
   pathCase=L.polyline([],{color:'#fff',weight:10,opacity:.9}).addTo(map);
   pathLine=L.polyline([],{color:getComputedStyle(document.documentElement).getPropertyValue('--best').trim()||'#0f766e',weight:6}).addTo(map);
   const total=pts.length,per=Math.max(1,Math.ceil(total/70));let k=0;
