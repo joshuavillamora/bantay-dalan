@@ -35,7 +35,8 @@ const ALGOS={
   dijkstra:{name:'Dijkstra',info:'Always explores the cheapest road next, so it spreads out in every direction. Guarantees the best route.'},
   greedy:{name:'Greedy best-first',info:'Only looks at the straight-line distance to the destination. Very focused, but the route it finds can be longer than the best one.'},
   bfs:{name:'Breadth-first',info:'Explores ring by ring, counting road segments and ignoring distance. Finds the fewest segments, not the shortest or fastest route.'},
-  dfs:{name:'Depth-first',info:'Dives down one road as far as it can, then backs up. Finds a route, but usually a long and winding one.'}
+  dfs:{name:'Depth-first',info:'Dives down one road as far as it can, then backs up. Finds a route, but usually a long and winding one.'},
+  bidir:{name:'Bidirectional Dijkstra',info:'Runs Dijkstra from the start and from the destination at the same time, and stops when the two searches meet. Finds the same best route as Dijkstra but explores far fewer roads.'},
 };
 const fromIn=$('from'), toIn=$('to'), algoSel=$('algo');
 algoSel.innerHTML=Object.entries(ALGOS).map(([k,v])=>`<option value="${k}">${v.name}</option>`).join('');
@@ -257,8 +258,48 @@ async function loadGraph() {
 }
 function nearest(g,p){let best=-1,bd=Infinity;for(let i=0;i<g.lat.length;i++){if(!g.adj[i].length)continue;const d=hav(p[0],p[1],g.lat[i],g.lng[i]);if(d<bd){bd=d;best=i;}}return{i:best,d:bd};}
 
+/* Bidirectional Dijkstra: forward search from s, backward search from t over reversed roads. */
+function buildRadj(g){
+  if(g.radj)return g.radj;
+  const r=g.adj.map(()=>[]);
+  g.adj.forEach((list,u)=>list.forEach(([v,d,sp])=>r[v].push([u,d,sp])));
+  return g.radj=r;
+}
+function* bidir(g,s,t,mode){
+  if(s===t)return [s];
+  const n=g.lat.length,adjs=[g.adj,buildRadj(g)],w=(d,sp)=>mode==='fast'?d/(sp/3.6):d;
+  const dist=[new Float64Array(n).fill(Infinity),new Float64Array(n).fill(Infinity)];
+  const prev=[new Int32Array(n).fill(-1),new Int32Array(n).fill(-1)];
+  const done=[new Uint8Array(n),new Uint8Array(n)],heap=[new Heap(),new Heap()];
+  dist[0][s]=0;dist[1][t]=0;heap[0].push(s,0);heap[1].push(t,0);
+  const top=k=>{const h=heap[k];while(h.size&&done[k][h.v[0]])h.pop();return h.size?h.k[0]:Infinity;};
+  let mu=Infinity,meet=-1;
+  for(;;){
+    const tf=top(0),tb=top(1);
+    if(tf===Infinity||tb===Infinity||tf+tb>=mu)break;
+    const k=tf<=tb?0:1,o=1-k,u=heap[k].pop();
+    done[k][u]=1;
+    if(dist[o][u]<Infinity&&dist[k][u]+dist[o][u]<mu){mu=dist[k][u]+dist[o][u];meet=u;}
+    const found=[];
+    for(const [v,d,sp] of adjs[k][u]){
+      if(done[k][v])continue;
+      const nc=dist[k][u]+w(d,sp);
+      if(nc<dist[k][v]){if(dist[k][v]===Infinity)found.push(v);dist[k][v]=nc;prev[k][v]=u;heap[k].push(v,nc);}
+      if(dist[o][v]<Infinity&&dist[k][v]+dist[o][v]<mu){mu=dist[k][v]+dist[o][v];meet=v;}
+    }
+    yield{u,p:prev[k][u],found,q:heap[0].size+heap[1].size};
+  }
+  if(meet<0)return null;
+  const path=[];
+  for(let v=meet;v>=0;v=prev[0][v])path.push(v);
+  path.reverse();
+  for(let v=prev[1][meet];v>=0;v=prev[1][v])path.push(v);
+  return path;
+}
+
 /* ---------- the algorithms, as one generator that yields one visited road at a time ---------- */
 function* search(g,s,t,algo,mode){
+  if(algo==='bidir')return yield* bidir(g,s,t,mode);
   const n=g.lat.length,cost=new Float64Array(n).fill(Infinity),prev=new Int32Array(n).fill(-1),done=new Uint8Array(n),seen=new Uint8Array(n);
   const hv=v=>hav(g.lat[v],g.lng[v],g.lat[t],g.lng[t])/(mode==='fast'?80/3.6:1);
   const key=(v,c)=>algo==='dijkstra'?c:algo==='astar'?c+hv(v):hv(v);
