@@ -57,11 +57,64 @@ function setPt(which,ll,name){
 }
 setPt('s',PLACES["Plaza Libertad (City Proper)"],"Plaza Libertad (City Proper)");
 setPt('e',PLACES["SM City Iloilo"],"SM City Iloilo");
+
 map.on('click',e=>{
+  if(drawing){drawClick(e.latlng);return;}
   const ll=[e.latlng.lat,e.latlng.lng];
   if(clickState===0){setPt('s',ll,'Pinned point');clickState=1;}
   else{setPt('e',ll,'Pinned point');clickState=0;}
 });
+
+/* ---------- road closures: red lines drawn across roads ---------- */
+let closures=[],drawing=false,corner=null,draft=null;
+const HINT='Draw a red line across a road to close it. Click a line to reopen it.';
+function closuresChanged(){
+  cancel();clearDrawing();results=[];renderResults();msg('');
+  $('closeClear').disabled=!closures.length;
+  $('closeDraw').textContent='Close a road'+(closures.length?` (${closures.length})`:'');
+}
+function setDrawing(v){
+  drawing=v;corner=null;if(draft){draft.remove();draft=null;}
+  $('closeDraw').classList.toggle('on',v);$('closeDraw').setAttribute('aria-pressed',v);
+  map.getContainer().classList.toggle('drawing',v);
+  $('closeHint').textContent=v?'Click where the closure starts, then where it ends. Esc cancels.':HINT;
+}
+function drawClick(ll){
+  if(!corner){
+    corner=ll;
+    draft=L.polyline([ll,ll],{className:'closure draft',interactive:false}).addTo(map);
+    return;
+  }
+  const c=corner;setDrawing(false);
+  const a=[c.lat,c.lng],b=[ll.lat,ll.lng];
+  if(hav(a[0],a[1],b[0],b[1])<15){msg('That line is too short. Click further away.');return;}
+  const line=L.polyline([a,b],{className:'closure'}).addTo(map).bindTooltip('Road closed · click to reopen',{sticky:true});
+  const item={a,b,line};closures.push(item);
+  line.on('click',ev=>{
+    if(drawing)return;
+    L.DomEvent.stopPropagation(ev);   // don't also drop a pin
+    line.remove();closures=closures.filter(x=>x!==item);closuresChanged();
+  });
+  closuresChanged();
+}
+map.on('mousemove',e=>{if(drawing&&corner&&draft)draft.setLatLngs([corner,e.latlng]);});
+$('closeDraw').onclick=()=>setDrawing(!drawing);
+$('closeClear').onclick=()=>{closures.forEach(c=>c.line.remove());closures=[];closuresChanged();};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drawing)setDrawing(false);});
+setDrawing(false);   // set starting hint text
+
+/*road segment is closed when it crosses a closure line */
+const ccw=(a,b,c)=>(c[0]-a[0])*(b[1]-a[1])>(b[0]-a[0])*(c[1]-a[1]);
+const crosses=(p,q,r,s)=>ccw(p,r,s)!==ccw(q,r,s)&&ccw(p,q,r)!==ccw(p,q,s);
+function openRoads(g){  
+  if(!closures.length)return g;
+  const adj=g.adj.map((list,u)=>{
+    const p=[g.lat[u],g.lng[u]];
+    return list.filter(e=>!closures.some(c=>crosses(p,[g.lat[e[0]],g.lng[e[0]]],c.a,c.b)));
+  });
+  return {lat:g.lat,lng:g.lng,adj,b:g.b,major:g.major};
+}
+
 $('swap').onclick=()=>{$('swap').classList.toggle('flipped');const a=start,an=names.s,b=end,bn=names.e;if(b)setPt('s',b,bn);if(a)setPt('e',a,an);};
 $('gps').onclick=()=>{
   if(!navigator.geolocation){msg('Geolocation is not supported in this browser.');return;}
