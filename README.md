@@ -22,8 +22,7 @@ js/
   graph/       road-graph.js                       load JSON -> adjacency list, nearest node, route metrics
                closure-filter.js                   apply closure lines to a graph
   algorithms/  common.js                           edge cost, heuristic, path tracing
-               best-first.js                       engine shared by Dijkstra / A* / Greedy
-               dijkstra.js astar.js greedy.js bfs.js dfs.js bidirectional.js lpa-star.js
+               dijkstra.js astar.js bidirectional.js lpa-star.js
                index.js                            registry (name, description, run) -> add new algorithms here
   map/         map.js                              Leaflet map + tiles
                explore-layer.js                    canvas layer for the search animation
