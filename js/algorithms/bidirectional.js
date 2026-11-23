@@ -26,7 +26,7 @@ export function* bidirectional(g, s, t, mode) {
       if (nc < dist[k][v]) { if (dist[k][v] === Infinity) found.push(v); dist[k][v] = nc; prev[k][v] = u; heap[k].push(v, nc); }
       if (dist[o][v] < Infinity && dist[k][v] + dist[o][v] < mu) { mu = dist[k][v] + dist[o][v]; meet = v; }
     }
-    yield { u, p: prev[k][u], found, q: heap[0].size + heap[1].size };
+    yield { u, p: prev[k][u], found, q: heap[0].size + heap[1].size, direction: k === 0 ? 'forward' : 'backward' };
   }
   if (meet < 0) return null;
   const path = [];

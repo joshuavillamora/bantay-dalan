@@ -24,52 +24,65 @@ async function remoteMatches(q, signal) {
 
 function attach(input, which) {
   const list = $(input.id + 'List'); let items = [], active = -1, timer = null, ctrl = null, seq = 0;
-  const open = v => { list.hidden = !v; input.setAttribute('aria-expanded', v); if (!v) { active = -1; input.removeAttribute('aria-activedescendant'); } };
-  const render = loading => {
-    if (!items.length && !loading) { list.innerHTML = input.value.trim() ? '<li class="empty">No places found in Iloilo.</li>' : ''; open(!!input.value.trim()); return; }
+  const open = v => {
+    list.hidden = !v; input.setAttribute('aria-expanded', v);
+    if (v && active >= 0) input.setAttribute('aria-activedescendant', input.id + 'Opt' + active);
+    else input.removeAttribute('aria-activedescendant');
+  };
+  const dismiss = () => {
+    seq++; clearTimeout(timer); ctrl?.abort(); active = -1; open(false);
+    input.value = state.names[which];
+  };
+  const render = (loading, unavailable = false) => {
+    if (!items.length && !loading) {
+      list.innerHTML = `<li class="empty" role="presentation">${unavailable ? 'Online search is unavailable. Try a saved place or pick on the map.' : 'No matching places in Iloilo.'}</li>`;
+      open(!!input.value.trim()); return;
+    }
     list.innerHTML = items.map((p, i) => `<li role="option" id="${input.id}Opt${i}" class="opt${i === active ? ' active' : ''}" aria-selected="${i === active}" data-i="${i}">
       <span class="ico ${p.preset ? 'star' : 'pin'}" aria-hidden="true"></span><span><b>${esc(p.name)}</b><small>${esc(p.detail)}</small></span></li>`).join('')
-      + (loading ? '<li class="empty">Searching…</li>' : '');
+      + (loading ? '<li class="empty" role="presentation">Searching…</li>' : '');
     open(true);
   };
   const update = () => {
     const q = input.value.trim().toLowerCase(), my = ++seq;
     items = localMatches(q); active = items.length ? 0 : -1;
-    clearTimeout(timer);
+    clearTimeout(timer); ctrl?.abort();
     if (q.length < 3) { render(false); return; }
     render(true);
     timer = setTimeout(async () => {
+      let unavailable = false;
       try {
-        if (ctrl) ctrl.abort(); ctrl = new AbortController();
+        ctrl = new AbortController();
         const found = await remoteMatches(q, ctrl.signal);
         if (my !== seq) return;
         const seen = new Set(items.map(p => p.name.toLowerCase()));
         items = items.concat(found.filter(p => !seen.has(p.name.toLowerCase()))).slice(0, 8);
-      } catch (e) { if (e.name === 'AbortError' || my !== seq) return; }
+      } catch (e) { if (e.name === 'AbortError' || my !== seq) return; unavailable = true; }
       if (active < 0 && items.length) active = 0;
-      render(false);
+      render(false, unavailable);
     }, 300);
   };
   const choose = i => {
     const p = items[i]; if (!p) return;
-    setPoint(which, p.ll, p.name); open(false);
-    if (!map.getBounds().contains(p.ll)) map.panTo(p.ll);
+    setPoint(which, p.ll, p.name); dismiss();
+    if (!map.getBounds().contains(p.ll)) map.panTo(p.ll, { animate: false });
   };
   const move = d => {
     if (!items.length) return;
-    active = (active + d + items.length) % items.length; render(false);
+    active = active < 0 ? (d > 0 ? 0 : items.length - 1) : (active + d + items.length) % items.length;
+    render(false);
     const el = $(input.id + 'Opt' + active);
     if (el) { input.setAttribute('aria-activedescendant', el.id); el.scrollIntoView({ block: 'nearest' }); }
   };
-  input.addEventListener('focus', () => { input.select(); seq++; clearTimeout(timer); items = localMatches(''); active = -1; render(false); });
+  input.addEventListener('focus', () => { input.select(); items = localMatches(''); active = -1; render(false); });
   input.addEventListener('input', update);
   input.addEventListener('keydown', e => {
     if (e.key === 'ArrowDown') { e.preventDefault(); list.hidden ? update() : move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
     else if (e.key === 'Enter') { if (!list.hidden && active >= 0) { e.preventDefault(); choose(active); } }
-    else if (e.key === 'Escape') { open(false); input.value = state.names[which]; }
+    else if (e.key === 'Escape' && !list.hidden) { e.stopPropagation(); dismiss(); }
   });
-  input.addEventListener('blur', () => setTimeout(() => { open(false); input.value = state.names[which]; }, 150));
+  input.addEventListener('blur', dismiss);
   list.addEventListener('mousedown', e => { const li = e.target.closest('[data-i]'); if (li) { e.preventDefault(); choose(+li.dataset.i); input.blur(); } });
 }
 

@@ -16,7 +16,7 @@ export const DEFAULT_END = "SM City Iloilo";
 
 export const MAP_CENTER = [10.7050, 122.5600];
 export const MAP_ZOOM = 13;
-export const CARTO_API_KEY = "";                 // leave "" to use the free Esri tiles
+export const CARTO_API_KEY = "";                 // optional public CARTO basemap key
 export const ROADS_URL = 'data/iloilo-roads.json';
 export const SEARCH_BOX = '122.38,10.62,122.66,10.88';   // west,south,east,north for place search
 

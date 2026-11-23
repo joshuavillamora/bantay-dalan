@@ -51,6 +51,16 @@ export function nearestNode(g, p) {
   return { i: best, d: bd };
 }
 
+/* Snap each endpoint to the base graph so a closure cannot silently move a pin. */
+export function snapRouteEndpoints(g, start, end) {
+  const snap = point => {
+    if (!point) return -1;
+    const { i, d } = nearestNode(g, point);
+    return d <= 1500 ? i : -1;
+  };
+  return { s: snap(start), t: snap(end) };
+}
+
 /* reversed copy of the roads (who can reach me?), cached on the graph */
 export function reverseAdjacency(g) {
   if (g.radj) return g.radj;

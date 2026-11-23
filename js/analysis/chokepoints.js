@@ -9,17 +9,20 @@ import { reverseAdjacency, routeMetrics } from '../graph/road-graph.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 
-export async function findChokepoints(g, demand, { candidates = 40, topK = 8, penalty = 1800, onProgress = () => {} } = {}) {
+export async function findChokepoints(g, demand, { candidates = 40, topK = 8, penalty = 1800, onProgress = () => {}, signal } = {}) {
   const n = g.lat.length, radj = reverseAdjacency(g), demandSet = new Set(demand.map(d => d.i));
   const neighbours = u => { const s = new Set(); for (const e of g.adj[u]) s.add(e[0]); for (const e of radj[u]) s.add(e[0]); return s.size; };
   const isJunction = u => neighbours(u) !== 2;          // dead ends and 3+ way intersections end a link
 
   // 1. base routes
-  const trips = [];
+  const trips = [], pairs = demand.length * (demand.length - 1) / 2;
+  let routed = 0;
   for (let a = 0; a < demand.length; a++) for (let b = a + 1; b < demand.length; b++) {
+    signal?.throwIfAborted();
     const path = shortestPath(g, demand[a].i, demand[b].i);
     if (path && path.length > 1) trips.push({ path, time: routeMetrics(g, path).time });
-    if (trips.length % 6 === 0) { onProgress('Routing trips', trips.length, 1); await tick(); }
+    routed++;
+    if (routed % 6 === 0 || routed === pairs) { onProgress('Routing trips', routed, pairs); await tick(); }
   }
 
   // 2. links and how many trips use each
@@ -44,6 +47,7 @@ export async function findChokepoints(g, demand, { candidates = 40, topK = 8, pe
   // 3. close each candidate and measure the damage
   const scored = [];
   for (let c = 0; c < used.length; c++) {
+    signal?.throwIfAborted();
     const link = used[c], touched = new Set(link.nodes), closedPairs = new Set();
     for (let k = 1; k < link.nodes.length; k++) { closedPairs.add(link.nodes[k-1] * n + link.nodes[k]); closedPairs.add(link.nodes[k] * n + link.nodes[k-1]); }
     const saved = [...touched].map(u => [u, g.adj[u]]);
@@ -58,6 +62,7 @@ export async function findChokepoints(g, demand, { candidates = 40, topK = 8, pe
     scored.push({ link, extra, cut, rerouted, score: extra + penalty * cut });
     onProgress('Testing closures', c + 1, used.length); await tick();
   }
+  signal?.throwIfAborted();
 
   // 4. rank, skipping repeats of the same corridor
   scored.sort((x, y) => y.score - x.score);
@@ -75,7 +80,7 @@ export async function findChokepoints(g, demand, { candidates = 40, topK = 8, pe
     });
     if (out.length >= topK) break;
   }
-  return { chokepoints: out, trips: trips.length };
+  return { chokepoints: out, trips: trips.length, examined: used.length };
 }
 
 /* directed edge codes (u*n+v, both ways) for closing a link */

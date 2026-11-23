@@ -1,2 +1,5 @@
 export const $ = id => document.getElementById(id);
-export const setMessage = t => { $('msg').textContent = t || ''; };
+export const setMessage = (text = '') => {
+  $('msg').textContent = text;
+  $('msg').hidden = !text;
+};

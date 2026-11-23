@@ -1,15 +1,23 @@
-/* The comparison table: one row per finished run on the same start and destination. */
-import { state } from '../state.js';
 import { $ } from '../utils/dom.js';
-import { fmtD, fmtT } from '../utils/format.js';
+import { esc, fmtClosureCount, fmtD } from '../utils/format.js';
 
-export function addResult(row) { state.results.push(row); renderResults(); }
-export function clearResults() { state.results = []; renderResults(); }
+export const fmtMs = ms => ms < .01 ? '<0.01 ms' : `${ms.toFixed(2)} ms`;
 
-export function renderResults() {
-  const rows = state.results;
+export function renderResults(rows = []) {
   $('resBox').hidden = !rows.length;
-  const metric = r => r.mode === 'fast' ? r.time : r.dist;
-  const best = {}; rows.forEach(r => { best[r.mode] = Math.min(best[r.mode] ?? Infinity, metric(r)); });
-  $('res').innerHTML = rows.map(r => `<tr><td>${r.name}<br><small>${r.mode === 'fast' ? 'fastest' : 'shortest'}</small></td><td>${r.n.toLocaleString()}</td><td>${fmtD(r.dist)}</td><td>${fmtT(r.time)}${metric(r) <= best[r.mode] * 1.0001 ? ' ✓' : ''}</td></tr>`).join('');
+  $('res').innerHTML = rows.length ? `<table>
+    <thead><tr><th scope="col">Algorithm</th><th scope="col">Expanded</th><th scope="col">Compute time</th><th scope="col">Distance</th></tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <th scope="row">${row.name}<small class="${row.matches ? 'verified' : ''}">${row.verdict}</small></th>
+      <td class="num">${row.count.toLocaleString()}</td><td class="num">${esc(fmtMs(row.ms))}</td>
+      <td class="num">${row.path ? fmtD(row.dist) : '—'}${row.path ? `<small>${(row.time / 60).toFixed(1)} min est.</small>` : ''}</td>
+    </tr>`).join('')}</tbody>
+  </table>` : '';
+}
+
+export function renderRepair(run) {
+  $('repairBox').hidden = !run;
+  $('repairResult').textContent = run
+    ? `${run.count.toLocaleString()} processed vertices · ${fmtMs(run.ms)} compute · ${run.path ? 'Route available' : 'Unreachable'} · ${fmtClosureCount(run.closures.length)}. Reused search state for the same trip.`
+    : '';
 }

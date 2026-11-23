@@ -65,9 +65,20 @@ function createSearch(g, s, t, mode, closures) {
 
 /* first search: builds and remembers the search state */
 export function* lpaSearch(g, s, t, mode, closures) {
-  saved = createSearch(g, s, t, mode, closures);
-  saved.rhs[s] = 0; saved.update(s);
+  saved = startSearch(g, s, t, mode, closures);
   return yield* saved.compute();
+}
+
+/* A comparison run must leave the interactive repair state intact. */
+export function* lpaFresh(g, s, t, mode) {
+  return yield* startSearch(g, s, t, mode, []).compute();
+}
+
+function startSearch(g, s, t, mode, closures) {
+  const search = createSearch(g, s, t, mode, closures);
+  search.rhs[s] = 0;
+  search.update(s);
+  return search;
 }
 
 /* closures changed: update only the affected nodes, return a generator that repairs the route */

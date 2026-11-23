@@ -1,9 +1,8 @@
-/* Shared engine for Dijkstra, A* and Greedy best-first: expand the node with the lowest priority.
-   priority(costSoFar, estimateToGoal) decides the flavour. greedy=true freezes a node's cost the first time it is seen. */
+/* Shared engine for Dijkstra and A*: expand the node with the lowest priority. */
 import { Heap } from '../core/heap.js';
 import { edgeCost, heuristic, tracePath } from './common.js';
 
-export function* bestFirst(g, s, t, mode, { priority, greedy = false }) {
+export function* bestFirst(g, s, t, mode, { priority }) {
   const n = g.lat.length, cost = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1), done = new Uint8Array(n);
   const heap = new Heap(), h = heuristic(g, t, mode);
   cost[s] = 0; heap.push(s, 0);
@@ -15,7 +14,7 @@ export function* bestFirst(g, s, t, mode, { priority, greedy = false }) {
     if (u !== t) for (const [v, d, sp] of g.adj[u]) {
       if (done[v]) continue;
       const nc = cost[u] + edgeCost(mode, d, sp);
-      if (nc < cost[v] && (!greedy || cost[v] === Infinity)) {
+      if (nc < cost[v]) {
         if (cost[v] === Infinity) found.push(v);
         cost[v] = nc; prev[v] = u; heap.push(v, priority(nc, h(v)));
       }
