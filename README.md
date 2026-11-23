@@ -17,6 +17,7 @@ js/
   config.js                     places, tile key, road speeds, constants
   state.js                      shared plain-data state
   events.js                     tiny pub/sub (route:changed, settings:changed, closures:changed)
+  analysis/    chokepoints.js                      finds the roads whose closure hurts the community most (pure logic)
   core/        heap.js, two-key-heap.js            priority queues
   graph/       road-graph.js                       load JSON -> adjacency list, nearest node, route metrics
                closure-filter.js                   apply closure lines to a graph
@@ -28,10 +29,12 @@ js/
                explore-layer.js                    canvas layer for the search animation
                markers.js                          start / destination pins
                route-view.js                       search head dot + final route line
+               chokepoint-view.js                  numbered red markers for chokepoints
   features/    algorithm-panel.js                  dropdown + Fastest/Shortest
                route-points.js                     map clicks, swap, GPS, defaults
                place-search.js                     search-as-you-type boxes
                closures.js                         draw / remove road closures
+               chokepoints.js                      'Find critical roads' button + ranked list
                run-controller.js                   start, animate, pause/step/skip, results, LPA* repair
   ui/          dashboard.js results-table.js welcome.js
   utils/       dom.js format.js geo.js

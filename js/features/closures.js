@@ -8,7 +8,7 @@ import { emit } from '../events.js';
 let closures = [], drawing = false, corner = null, draft = null;
 const HINT = 'Draw a red line across a road to close it. Click a line to reopen it.';
 
-export const getClosures = () => closures;     // [{ a:[lat,lng], b:[lat,lng], line }]
+export const getClosures = () => closures;     // [{ a:[lat,lng], b:[lat,lng], line } or { keys:Set, line }]
 export const isDrawing = () => drawing;
 
 function changed() {
@@ -38,6 +38,18 @@ export function handleMapClick(ll) {
   line.on('click', ev => {
     if (drawing) return;
     L.DomEvent.stopPropagation(ev);   // don't also drop a pin
+    line.remove(); closures = closures.filter(x => x !== item); changed();
+  });
+  changed();
+}
+
+/* close a whole road link (used by the chokepoint list): coords = [[lat,lng],...], keys = Set of directed edge codes */
+export function addLinkClosure(coords, keys) {
+  const line = L.polyline(coords, { className: 'closure' }).addTo(map).bindTooltip('Road closed · click to reopen', { sticky: true });
+  const item = { keys, line }; closures.push(item);
+  line.on('click', ev => {
+    if (drawing) return;
+    L.DomEvent.stopPropagation(ev);
     line.remove(); closures = closures.filter(x => x !== item); changed();
   });
   changed();

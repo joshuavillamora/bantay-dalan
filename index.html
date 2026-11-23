@@ -60,14 +60,22 @@
     </section>
 
   <section class="group">
-    <h2><span class="num">03</span>Algorithm</h2>
+    <h2><span class="num">03</span>Chokepoints</h2>
+    <button id="chokeBtn" class="outline-btn" type="button">Find critical roads</button>
+    <p class="hint" id="chokeHint">Finds the roads whose closure would hurt trips between popular places the most.</p>
+    <ol id="chokeList" class="choke-list"></ol>
+    <button id="chokeClear" class="link-btn" type="button" hidden>Hide from map</button>
+  </section>
+
+  <section class="group">
+    <h2><span class="num">04</span>Algorithm</h2>
     <div class="select-wrap"><select id="algo" aria-label="Algorithm"></select></div>
     <p class="info" id="info"></p>
     <div class="seg" role="group" aria-label="Optimize for"><button id="mFast" class="on" type="button">Fastest</button><button id="mShort" type="button">Shortest</button></div>
   </section>
 
   <section class="group">
-    <h2><span class="num">04</span>Run</h2>
+    <h2><span class="num">05</span>Run</h2>
     <div class="speed">
       <label for="spd">Speed</label>
       <input id="spd" type="range" min="0" max="100" value="60">
@@ -98,7 +106,7 @@
   </section>
 
   <section id="resBox" class="group" hidden>
-    <h2><span class="num">05</span>Comparison</h2>
+    <h2><span class="num">06</span>Comparison</h2>
     <p class="hint">Same start and destination. ✓ marks the best route so far.</p>
     <div class="table-wrap">
       <table><thead><tr><th>Algorithm</th><th>Explored</th><th>Dist.</th><th>Time</th></tr></thead><tbody id="res"></tbody></table>
@@ -128,7 +136,7 @@
       <p class="lead"><em>Bantay dalan</em> means “watch the road.” See how computers find a route through Iloilo’s real streets, one road at a time.</p>
       <ol class="steps">
         <li><span class="step-num">1</span><div><b>Pick two places</b><span>Search by name or click the map.</span></div></li>
-        <li><span class="step-num">2</span><div><b>Choose an algorithm</b><span>A*, Dijkstra, Greedy, BFS, or DFS.</span></div></li>
+        <li><span class="step-num">2</span><div><b>Choose an algorithm</b><span>A*, Dijkstra, Bidirectional, LPA*, and more.</span></div></li>
         <li><span class="step-num">3</span><div><b>Press Visualize</b><span>Watch the search spread, then compare.</span></div></li>
       </ol>
       <button id="wGo" class="primary" type="button">Start exploring <span aria-hidden="true">→</span></button>

@@ -24,3 +24,13 @@ export const SPEED = {motorway:80,trunk:60,primary:50,secondary:40,tertiary:35,u
   motorway_link:40,trunk_link:35,primary_link:30,secondary_link:30,tertiary_link:30};   // km/h
 export const DEFAULT_ROAD_SPEED = 25;
 export const MAX_SPEED_MS = 80 / 3.6;            // fastest road, used by A*-style heuristics
+
+/* Chokepoint finder: trips between these places represent how the community moves around.
+   (The airport is left out: it is in Cabatuan, outside the city, and would make the highway to it look critical.) */
+export const CHOKEPOINTS = {
+  places: ["Plaza Libertad (City Proper)","Fort San Pedro / Ferry Terminal","Robinsons Place Iloilo","Molo Church","Jaro Cathedral",
+           "Iloilo Esplanade","SM City Iloilo","Smallville Complex","Iloilo Convention Center"],
+  candidates: 40,              // most-used road links that get a full closure test
+  topK: 8,                     // how many to show
+  disconnectPenaltySec: 1800   // a trip that becomes impossible counts as 30 extra minutes
+};

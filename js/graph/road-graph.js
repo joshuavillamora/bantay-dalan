@@ -1,5 +1,6 @@
 /* The road network: loads the roads JSON once and builds an adjacency-list graph.
-   Graph shape: { lat[], lng[], adj[][] } where adj[u] = [[v, metres, km/h], ...] (directed edges). */
+   Graph shape: { lat[], lng[], adj[][], ways[] } where adj[u] = [[v, metres, km/h, wayIndex], ...] (directed edges)
+   and ways[wayIndex] is the road's name. */
 import { ROADS_URL, SPEED, DEFAULT_ROAD_SPEED } from '../config.js';
 import { hav } from '../utils/geo.js';
 
@@ -17,25 +18,26 @@ export async function loadGraph() {
 }
 
 export function buildGraph(elements) {
-  const idx = new Map(), lat = [], lng = [], adj = [];
+  const idx = new Map(), lat = [], lng = [], adj = [], ways = [];
   const node = (id, la, lo) => { let i = idx.get(id); if (i === undefined) { i = lat.length; idx.set(id, i); lat.push(la); lng.push(lo); adj.push([]); } return i; };
   for (const w of elements) {
     if (w.type !== 'way' || !w.geometry) continue;
     const t = w.tags || {}, sp = SPEED[t.highway] || DEFAULT_ROAD_SPEED;
     const oneway = t.oneway === '-1' ? -1 : (['yes','true','1'].includes(t.oneway) || t.junction === 'roundabout') ? 1 : 0;
+    const wi = ways.push(t.name || t.ref || ('Unnamed ' + String(t.highway || 'road').replace(/_/g, ' '))) - 1;
     let prev = -1;
     for (let k = 0; k < w.nodes.length; k++) {
       const p = w.geometry[k]; if (!p) { prev = -1; continue; }
       const c = node(w.nodes[k], p.lat, p.lon);
       if (prev >= 0) {
         const d = hav(lat[prev], lng[prev], lat[c], lng[c]);
-        if (oneway >= 0) adj[prev].push([c, d, sp]);
-        if (oneway <= 0) adj[c].push([prev, d, sp]);
+        if (oneway >= 0) adj[prev].push([c, d, sp, wi]);
+        if (oneway <= 0) adj[c].push([prev, d, sp, wi]);
       }
       prev = c;
     }
   }
-  return { lat, lng, adj };
+  return { lat, lng, adj, ways };
 }
 
 /* index of the closest road node to [lat, lng] */

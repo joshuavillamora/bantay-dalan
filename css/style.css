@@ -269,3 +269,12 @@ td:not(:first-child){font-family:var(--mono);font-weight:500;font-size:.76rem}
 .leaflet-container.drawing,.leaflet-container.drawing .leaflet-interactive{cursor:crosshair}
 path.closure{stroke:var(--end);stroke-width:6px;stroke-linecap:round}
 path.closure.draft{stroke-dasharray:2 10}
+/* ---------- chokepoints ---------- */
+.choke-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.choke-list li{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--soft);border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.choke-list li:hover{border-color:var(--ink)}
+.choke-list .rank,.choke-pin{flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--end);color:#fff;font:700 .78rem var(--mono);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.choke-text{flex:1;min-width:0;display:flex;flex-direction:column}
+.choke-text b{font-size:.84rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.choke-text small{font-size:.74rem;color:var(--mute)}
+.choke-text .cut{color:var(--end)}
