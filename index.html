@@ -3,146 +3,231 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bantay Dalan · Iloilo Pathfinding Visualizer</title>
-<meta name="description" content="Watch search algorithms find routes through Iloilo's real road network.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect x='7' y='7' width='26' height='26' rx='4' transform='rotate(45 20 20)' fill='%23ffc83d' stroke='%2316181d' stroke-width='2.5'/%3E%3Cpath d='M14 26c0-6 12-6 12-12' fill='none' stroke='%2316181d' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='14' cy='26' r='2.6' fill='%2316181d'/%3E%3Ccircle cx='26' cy='14' r='2.6' fill='%2316181d'/%3E%3C/svg%3E">
+<title>CHOKEPOINT · Road Network Analysis &amp; Resilience</title>
+<meta name="application-name" content="CHOKEPOINT">
+<meta name="description" content="CHOKEPOINT compares routing algorithms, simulates road closures, and analyzes critical links in Iloilo's modeled road network.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect x='7' y='7' width='26' height='26' rx='4' transform='rotate(45 20 20)' fill='%23ffc83d' stroke='%231b1f24' stroke-width='2.5'/%3E%3Cpath d='M14 26c0-6 12-6 12-12' fill='none' stroke='%231b1f24' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='14' cy='26' r='2.6' fill='%231b1f24'/%3E%3Ccircle cx='26' cy='14' r='2.6' fill='%231b1f24'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=DM+Sans:opsz,wght@9..40,400..700&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<aside id="panel">
-  <header class="brand">
+<header class="app-header">
+  <div class="brand">
     <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
-      <rect x="7" y="7" width="26" height="26" rx="4" transform="rotate(45 20 20)" fill="#ffc83d" stroke="#16181d" stroke-width="2.5"/>
-      <path d="M14 26c0-6 12-6 12-12" fill="none" stroke="#16181d" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="14" cy="26" r="2.6" fill="#16181d"/>
-      <circle cx="26" cy="14" r="2.6" fill="#16181d"/>
+      <rect x="7" y="7" width="26" height="26" rx="4" transform="rotate(45 20 20)" fill="#ffc83d" stroke="#1b1f24" stroke-width="2.5"/>
+      <path d="M14 26c0-6 12-6 12-12" fill="none" stroke="#1b1f24" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="14" cy="26" r="2.6" fill="#1b1f24"/><circle cx="26" cy="14" r="2.6" fill="#1b1f24"/>
     </svg>
-    <div class="brand-text">
-      <h1>Bantay Dalan</h1>
-      <p class="kicker">Iloilo · Pathfinding visualizer</p>
-    </div>
-    <button id="help" class="icon-btn" type="button" aria-label="About Bantay Dalan" title="About">?</button>
-  </header>
+    <div><h1>CHOKEPOINT</h1><p>Road Network Analysis &amp; Resilience</p></div>
+  </div>
+  <div class="header-actions">
+    <button id="panelToggle" type="button" class="quiet" aria-expanded="true" aria-controls="panel">Hide panel</button>
+    <button id="help" type="button" class="secondary">Help</button>
+  </div>
+</header>
 
-  <section class="group">
-    <h2><span class="num">01</span>Route</h2>
-    <div class="trip">
-      <span class="connector" aria-hidden="true"></span>
-      <div class="leg">
-        <i class="node start" aria-hidden="true"></i>
-        <label for="from" class="sr">From</label>
-        <div class="search"><input id="from" type="text" placeholder="Starting point" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="fromList"><ul id="fromList" class="suggest" role="listbox" aria-label="Start suggestions" hidden></ul></div>
-      </div>
-      <div class="leg">
-        <i class="node end" aria-hidden="true"></i>
-        <label for="to" class="sr">To</label>
-        <div class="search"><input id="to" type="text" placeholder="Destination" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="toList"><ul id="toList" class="suggest" role="listbox" aria-label="Destination suggestions" hidden></ul></div>
-      </div>
-      <button id="swap" class="icon-btn swap" type="button" aria-label="Swap start and destination" title="Swap"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4v15M4 8l4-4 4 4M16 20V5M12 16l4 4 4-4"/></svg></button>
-    </div>
-    <div class="route-extra">
-      <button id="gps" class="link-btn" type="button">◎ Use my location</button>
-      <span class="hint">or click the map to drop pins</span>
-    </div>
-  </section>
+<div class="workspace" id="workspace">
+  <nav class="mode-rail" aria-label="Workbench modes">
+    <button type="button" data-mode="route" aria-current="true" aria-controls="routePanel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="17" r="2"/><circle cx="19" cy="7" r="2"/><path d="M7 17h8a3 3 0 0 0 0-6H9a2 2 0 0 1 0-4h8"/></svg>Route
+    </button>
+    <button type="button" data-mode="disrupt" aria-controls="disruptPanel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v11m14-11v11M3 7h18v8H3zm4 8 6-8m0 8 6-8"/></svg>Disrupt
+    </button>
+    <button type="button" data-mode="analyze" aria-controls="analyzePanel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4m-12-9h6m-3-3v6"/></svg>Analyze
+    </button>
+    <button type="button" data-mode="compare" aria-controls="comparePanel">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14h16M8 15v-4m5 4V7m5 8v-6"/></svg>Compare
+    </button>
+  </nav>
 
-    <section class="group">
-      <h2><span class="num">02</span>Closures</h2>
-      <div class="closure-row">
-        <button id="closeDraw" class="outline-btn" type="button" aria-pressed="false">Close a road</button>
-        <button id="closeClear" class="link-btn" type="button" disabled>Clear all</button>
+  <aside id="panel" aria-label="Workbench controls">
+    <section class="mode-panel" id="routePanel" aria-labelledby="route-title">
+      <div class="panel-body">
+        <h2 id="route-title">Plan a route</h2>
+        <p class="intro">Search for a landmark, street, or mapped address. Choose a result to set the endpoint.</p>
+        <div class="trip">
+          <div class="leg">
+            <label for="from"><span class="point-label start" aria-hidden="true">A</span> Start</label>
+            <div class="search">
+              <input id="from" type="text" placeholder="Find a starting point" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="fromList" aria-describedby="fromAccess">
+              <div id="fromSuggest" class="suggest" hidden>
+                <p id="fromSuggestedHeading" class="suggest-heading" hidden>Suggested places</p>
+                <ul id="fromList" role="listbox" aria-label="Start suggestions" hidden></ul>
+                <p id="fromSearchStatus" class="search-status" role="status"></p>
+              </div>
+              <p id="fromAccess" class="hint endpoint-access" role="status" hidden></p>
+            </div>
+          </div>
+          <button id="swap" class="secondary swap" type="button" aria-label="Swap start and destination" title="Swap endpoints">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v16m-4-4 4 4 4-4M16 20V4m-4 4 4-4 4 4"/></svg>
+          </button>
+          <div class="leg">
+            <label for="to"><span class="point-label end" aria-hidden="true">B</span> Destination</label>
+            <div class="search">
+              <input id="to" type="text" placeholder="Find a destination" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="toList" aria-describedby="toAccess">
+              <div id="toSuggest" class="suggest" hidden>
+                <p id="toSuggestedHeading" class="suggest-heading" hidden>Suggested places</p>
+                <ul id="toList" role="listbox" aria-label="Destination suggestions" hidden></ul>
+                <p id="toSearchStatus" class="search-status" role="status"></p>
+              </div>
+              <p id="toAccess" class="hint endpoint-access" role="status" hidden></p>
+            </div>
+          </div>
+        </div>
+        <div class="tools point-tools">
+          <button id="pickStart" type="button" class="secondary" aria-pressed="false">Pick A</button>
+          <button id="pickEnd" type="button" class="secondary" aria-pressed="false">Pick B</button>
+          <button id="gps" type="button" class="quiet">Use my location</button>
+        </div>
+        <p class="search-credit">Online search by <a id="searchProvider" href="https://photon.komoot.io/" target="_blank" rel="noopener noreferrer">Photon</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a></p>
+        <div class="field">
+          <h3>Optimize for</h3>
+          <div class="seg" role="group" aria-label="Optimize for">
+            <button id="mFast" type="button" aria-pressed="true">Estimated fastest</button>
+            <button id="mShort" type="button" aria-pressed="false">Shortest distance</button>
+          </div>
+        </div>
+        <section id="live" class="inset" aria-labelledby="current-title">
+          <h3 id="current-title">Current route</h3>
+          <p id="tripName" class="hint">Choose endpoints to begin.</p>
+          <dl class="metrics">
+            <div><dt>Route distance</dt><dd id="sD">—</dd></div>
+            <div><dt>Estimated travel time</dt><dd id="sT">—</dd></div>
+          </dl>
+          <p id="routeDetail" class="hint">Travel estimates use fixed road speeds.</p>
+        </section>
       </div>
-      <p class="hint" id="closeHint"></p>
+      <div class="panel-actions"><button id="go" class="primary" type="button" disabled>Find route</button></div>
     </section>
 
-  <section class="group">
-    <h2><span class="num">03</span>Chokepoints</h2>
-    <button id="chokeBtn" class="outline-btn" type="button">Find critical roads</button>
-    <p class="hint" id="chokeHint">Finds the roads whose closure would hurt trips between popular places the most.</p>
-    <ol id="chokeList" class="choke-list"></ol>
-    <button id="chokeClear" class="link-btn" type="button" hidden>Hide from map</button>
-  </section>
+    <section class="mode-panel" id="disruptPanel" aria-labelledby="disrupt-title" hidden>
+      <div class="panel-body">
+        <h2 id="disrupt-title">Simulate a closure</h2>
+        <p class="intro">Draw across a road to remove the intersected segments from routing.</p>
+        <p id="closeHint" class="feedback" role="status" hidden></p>
+        <div class="split-heading"><h3 id="closureCount">Active closures (0)</h3><button id="closeClear" class="quiet" type="button" disabled>Clear all</button></div>
+        <p id="closureEmpty" class="hint">All modeled roads are open.</p>
+        <ol id="closureList" class="closure-list"></ol>
+        <button id="closeUndo" class="secondary" type="button" hidden>Undo last closure</button>
+        <section class="inset" aria-labelledby="impact-title">
+          <h3 id="impact-title">Route impact</h3>
+          <p id="routeImpact" class="hint">Find a route first to measure the effect of a closure.</p>
+          <div id="impactDetails" hidden></div>
+        </section>
+      </div>
+      <div class="panel-actions"><button id="closeDraw" class="primary" type="button" aria-pressed="false" disabled>Draw closure</button></div>
+    </section>
 
-  <section class="group">
-    <h2><span class="num">04</span>Algorithm</h2>
-    <div class="select-wrap"><select id="algo" aria-label="Algorithm"></select></div>
-    <p class="info" id="info"></p>
-    <div class="seg" role="group" aria-label="Optimize for"><button id="mFast" class="on" type="button">Fastest</button><button id="mShort" type="button">Shortest</button></div>
-  </section>
+    <section class="mode-panel" id="analyzePanel" aria-labelledby="analyze-title" hidden>
+      <div class="panel-body">
+        <h2 id="analyze-title">CHOKEPOINT</h2>
+        <p class="intro">Rank tested road links by their impact on sampled trips between Iloilo landmarks.</p>
+        <p id="chokeHint" class="feedback" role="status">Analysis uses the current simulated closures.</p>
+        <ol id="chokeList" class="choke-list"></ol>
+        <button id="chokeClear" class="quiet" type="button" hidden>Hide highlights</button>
+        <details class="method">
+          <summary>How the score works</summary>
+          <p>For each tested link, the model adds the extra estimated travel time across affected trips and a 30-minute penalty for each trip that becomes unreachable. The candidates are the most-used links on the sampled routes.</p>
+          <p>Trip sampling uses one direction per pair of configured landmarks. The rankings apply to this sample and the closures in effect when it ran.</p>
+        </details>
+      </div>
+      <div class="panel-actions analysis-actions">
+        <button id="chokeBtn" class="primary" type="button" disabled>Find critical roads</button>
+        <button id="chokeCancel" class="secondary" type="button" hidden>Cancel</button>
+      </div>
+    </section>
 
-  <section class="group">
-    <h2><span class="num">05</span>Run</h2>
-    <div class="speed">
-      <label for="spd">Speed</label>
-      <input id="spd" type="range" min="0" max="100" value="60">
+    <section class="mode-panel" id="comparePanel" aria-labelledby="compare-title" hidden>
+      <div class="panel-body">
+        <h2 id="compare-title">Compare algorithms</h2>
+        <p class="intro">Watch the search for your current trip, then compare fresh runs under the same conditions.</p>
+        <label class="field-label" for="algo">Search algorithm</label>
+        <select id="algo" aria-describedby="info"></select>
+        <p class="hint" id="info"></p>
+        <div class="tools"><button id="visualize" class="secondary" type="button" disabled>Visualize search</button></div>
+        <section class="inset" aria-labelledby="comparison-title">
+          <h3 id="comparison-title">Fresh search results</h3>
+          <p id="comparisonStatus" class="hint" role="status">Run a comparison to check route costs and count processed search events.</p>
+          <div id="resBox" hidden>
+            <div id="res" class="table-wrap" role="region" aria-label="Fresh algorithm comparison" tabindex="0"></div>
+            <p class="hint">One run per algorithm. Compute time excludes animation and shared graph preparation. Runtime varies by device.</p>
+          </div>
+        </section>
+        <section id="repairBox" class="inset" aria-labelledby="repair-title" hidden>
+          <h3 id="repair-title">LPA* incremental repair</h3>
+          <p id="repairResult" class="hint"></p>
+        </section>
+      </div>
+      <div class="panel-actions"><button id="compareBtn" class="primary" type="button" disabled>Run comparison</button></div>
+    </section>
+  </aside>
+
+  <main class="map-workspace" aria-label="Iloilo road map workspace">
+    <div class="map-stage">
+      <div id="map" role="region" aria-label="Map of Iloilo City" aria-describedby="mapKeys"></div>
+      <p id="mapKeys" class="sr">Use arrow keys to pan and plus or minus to zoom.</p>
+      <div class="map-tools">
+        <div class="map-caption">
+          <div><p class="map-place">Iloilo City, PH</p><p id="mapSource" role="status">Loading streets…</p></div>
+          <label class="sr" for="mapStyle">Map style</label>
+          <select id="mapStyle" aria-describedby="mapSource">
+            <option value="streets">Streets</option>
+            <option value="satellite">Satellite</option>
+            <option value="hybrid">Hybrid</option>
+          </select>
+          <button id="studyArea" type="button" class="map-button" aria-label="Center on study area" title="Center on study area">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
+          </button>
+        </div>
+        <p id="mapHint" class="map-hint" role="status" hidden></p>
+      </div>
     </div>
-    <button id="go" class="primary" type="button">Visualize route <span aria-hidden="true">→</span></button>
-    <div class="controls">
-      <button id="pause" type="button" disabled>Pause</button>
-      <button id="step" type="button" disabled>Step</button>
-      <button id="skip" type="button" disabled>Skip</button>
-      <button id="reset" type="button">Reset</button>
+    <details class="map-legend" id="mapLegend" hidden>
+      <summary>Map key</summary>
+      <ul id="legendItems"></ul>
+    </details>
+    <div class="map-footer">
+      <div class="map-status">
+        <b id="lt" role="status">Loading road network…</b>
+        <p id="msg" role="status" hidden></p>
+        <button id="graphRetry" type="button" class="secondary" hidden>Retry loading roads</button>
+      </div>
+      <button id="wheelMode" type="button" class="quiet" aria-label="Zoom with the scroll wheel" aria-pressed="false" title="Scroll pans the map. Hold Ctrl while scrolling to zoom.">Scroll pans</button>
+      <section id="playback" aria-label="Search playback" hidden>
+        <div class="playback-info">
+          <span><b id="sN">0</b> processed</span><span><b id="sQ">0</b> queue entries</span>
+          <label for="spd">Animation speed</label><input id="spd" type="range" min="0" max="100" value="60">
+        </div>
+        <div class="playback-actions">
+          <button id="pause" type="button" disabled>Pause</button>
+          <button id="step" type="button" disabled>Step</button>
+          <button id="skip" type="button" disabled>Skip</button>
+          <button id="reset" type="button">Reset</button>
+        </div>
+      </section>
     </div>
-    <div id="msg" role="status"></div>
-  </section>
-
-  <section id="live" class="dash">
-    <div class="dash-top"><span class="pulse" aria-hidden="true"></span><b id="lt">Ready</b></div>
-    <div class="stats">
-      <div class="stat"><span>Roads explored</span><b id="sN">0</b></div>
-      <div class="stat"><span>Waiting in line</span><b id="sQ">0</b></div>
-      <div class="stat"><span>Distance</span><b id="sD">–</b></div>
-      <div class="stat"><span>Travel time</span><b id="sT">–</b></div>
-    </div>
-    <ul class="legend">
-      <li><i class="sw ex"></i>Explored</li>
-      <li><i class="sw fr"></i>Found, not yet explored</li>
-      <li><i class="sw pa"></i>Final route</li>
-    </ul>
-  </section>
-
-  <section id="resBox" class="group" hidden>
-    <h2><span class="num">06</span>Comparison</h2>
-    <p class="hint">Same start and destination. ✓ marks the best route so far.</p>
-    <div class="table-wrap">
-      <table><thead><tr><th>Algorithm</th><th>Explored</th><th>Dist.</th><th>Time</th></tr></thead><tbody id="res"></tbody></table>
-    </div>
-  </section>
-
-  <footer class="foot">Road data © OpenStreetMap contributors</footer>
-</aside>
-
-<main>
-  <div id="map" aria-label="Map of Iloilo City"></div>
-</main>
-
-<div id="welcome" class="welcome" role="dialog" aria-modal="true" aria-labelledby="wTitle" hidden>
-  <div class="welcome-card">
-    <svg class="welcome-art" viewBox="0 0 520 120" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <rect width="520" height="120" fill="#1d2026"/>
-      <path d="M-10 92C90 92 120 30 220 30S350 96 440 70 530 30 540 30" fill="none" stroke="#2f343d" stroke-width="30" stroke-linecap="round"/>
-      <path d="M-10 92C90 92 120 30 220 30S350 96 440 70 530 30 540 30" fill="none" stroke="#ffc83d" stroke-width="2.5" stroke-dasharray="12 10"/>
-      <g fill="#f08c00" opacity=".9"><circle cx="150" cy="58" r="3"/><circle cx="175" cy="42" r="3"/><circle cx="262" cy="44" r="3"/><circle cx="300" cy="66" r="3"/></g>
-      <circle cx="58" cy="90" r="9" fill="#16a34a" stroke="#fff" stroke-width="3"/>
-      <circle cx="440" cy="70" r="9" fill="#dc2626" stroke="#fff" stroke-width="3"/>
-    </svg>
-    <div class="welcome-body">
-      <p class="kicker">Welcome to</p>
-      <h2 id="wTitle">Bantay Dalan</h2>
-      <p class="lead"><em>Bantay dalan</em> means “watch the road.” See how computers find a route through Iloilo’s real streets, one road at a time.</p>
-      <ol class="steps">
-        <li><span class="step-num">1</span><div><b>Pick two places</b><span>Search by name or click the map.</span></div></li>
-        <li><span class="step-num">2</span><div><b>Choose an algorithm</b><span>A*, Dijkstra, Bidirectional, LPA*, and more.</span></div></li>
-        <li><span class="step-num">3</span><div><b>Press Visualize</b><span>Watch the search spread, then compare.</span></div></li>
-      </ol>
-      <button id="wGo" class="primary" type="button">Start exploring <span aria-hidden="true">→</span></button>
-    </div>
-  </div>
+  </main>
 </div>
+
+<dialog id="welcome" aria-labelledby="wTitle">
+  <h2 id="wTitle">CHOKEPOINT</h2>
+  <p>Explore Iloilo’s modeled road network. Start with Plaza Libertad and SM City Iloilo, or choose different locations.</p>
+  <ul>
+    <li><b>Route</b> finds a path using modeled road distance or fixed road speeds.</li>
+    <li><b>Disrupt</b> lets you simulate closures and measure how the trip changes.</li>
+    <li><b>Analyze</b> ranks tested links by their effect on sampled trips.</li>
+    <li><b>Compare</b> animates real search steps and checks optimal cost against Dijkstra.</li>
+  </ul>
+  <p>Drag to pan. On touchscreens, pinch to zoom. Over the map, scroll to pan or hold Ctrl while scrolling to zoom. Use the scroll control to switch its default action. If a trackpad pinch is handled by the browser, use the map’s + and − controls.</p>
+  <p>Use the map style menu for Streets, Satellite, or Hybrid. The two photo styles use Stadia’s localhost access. Select an A or B pin to open a nearby Google Street View, where available.</p>
+  <form method="dialog"><button id="wGo" class="primary" type="submit" autofocus>Back to the map</button></form>
+  <p class="dialog-credit">CC 204 · Data Structures and Algorithms</p>
+</dialog>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>

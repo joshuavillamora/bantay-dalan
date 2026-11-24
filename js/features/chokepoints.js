@@ -1,57 +1,115 @@
-/* "Find critical roads" button and the ranked list. Clicking an item zooms to it; "Close" adds it as a road closure. */
-import { map } from '../map/map.js';
+/* Run the sampled impact analysis and tie results to the closure snapshot it used. */
 import { showChokepoints, focusChokepoint, clearChokepoints } from '../map/chokepoint-view.js';
 import { $, setMessage } from '../utils/dom.js';
-import { esc } from '../utils/format.js';
+import { esc, fmtClosureCount } from '../utils/format.js';
 import { PLACES, CHOKEPOINTS } from '../config.js';
-import { loadGraph, nearestNode } from '../graph/road-graph.js';
-import { removeClosedRoads } from '../graph/closure-filter.js';
+import { nearestRoadVertex } from '../graph/road-graph.js';
 import { findChokepoints } from '../analysis/chokepoints.js';
-import { getClosures, addLinkClosure } from './closures.js';
+import { getClosures, getRoutingGraph, addLinkClosure } from './closures.js';
+import { on } from '../events.js';
 
-let results = [], busy = false;
+let base, results = [], controller, shown = false, cached;
+const status = text => { $('chokeHint').textContent = text; };
 const mins = s => (s / 60).toFixed(1);
 
 function render() {
   $('chokeClear').hidden = !results.length;
+  $('chokeClear').textContent = shown ? 'Hide highlights' : 'Show highlights';
   $('chokeList').innerHTML = results.map((c, i) => {
-    const bits = [`${c.used} of ${c.total} trips use it`];
-    if (c.rerouted) bits.push(`+${mins(c.avgExtra)} min detour`);
-    if (c.cut) bits.push(`<b class="cut">${c.cut} cut off</b>`);
-    return `<li data-i="${i}"><span class="rank">${i + 1}</span><div class="choke-text"><b>${esc(c.name)}</b><small>${bits.join(' · ')}</small></div><button type="button" class="link-btn" data-close="${i}">Close</button></li>`;
+    const name = c.name.startsWith('Unnamed ') ? `${c.name} · link ${c.key.replaceAll(':', '–')}` : c.name;
+    const detour = c.rerouted ? ` · +${mins(c.avgExtra)} min avg. detour` : '';
+    return `<li><span class="rank" aria-hidden="true">${i + 1}</span>
+      <button type="button" class="choke-preview" data-preview="${i}" aria-pressed="false">
+        <strong>${esc(name)}</strong>
+        <small>${c.used}/${c.total} sampled trips · ${c.cut} unreachable${detour}</small>
+        <small>Impact score ${mins(c.score)} min</small>
+      </button>
+      <button type="button" class="quiet" data-close="${i}" aria-label="Simulate closure of ${esc(name)}">Simulate</button>
+    </li>`;
   }).join('');
 }
 
 async function analyze() {
-  if (busy) return; busy = true; $('chokeBtn').disabled = true; setMessage('');
-  $('chokeHint').textContent = 'Loading road network…';
+  if (controller || !base) return;
+  const closures = getClosures();
+  if (cached?.closures === closures) {
+    display(cached);
+    return;
+  }
+  controller = new AbortController();
+  const { signal } = controller;
+  $('chokeBtn').disabled = true;
+  $('chokeCancel').hidden = false;
+  results = []; shown = false; render(); clearChokepoints();
+  status('Preparing sampled trips…');
   try {
-    const base = await loadGraph(), g = removeClosedRoads(base, getClosures());
-    const demand = CHOKEPOINTS.places.map(name => ({ name, i: nearestNode(g, PLACES[name]).i })).filter(d => d.i >= 0);
-    const { chokepoints, trips } = await findChokepoints(g, demand, {
-      candidates: CHOKEPOINTS.candidates, topK: CHOKEPOINTS.topK, penalty: CHOKEPOINTS.disconnectPenaltySec,
-      onProgress: (what, done, total) => { $('chokeHint').textContent = `${what}… ${done}/${total}`; }
+    const graph = getRoutingGraph();
+    const demand = CHOKEPOINTS.places.map(name => ({ name, i: nearestRoadVertex(graph, PLACES[name], base).i })).filter(d => d.i >= 0);
+    const { chokepoints, trips, examined } = await findChokepoints(graph, demand, {
+      candidates: CHOKEPOINTS.candidates, topK: CHOKEPOINTS.topK, penalty: CHOKEPOINTS.disconnectPenaltySec, signal,
+      onProgress: (what, done, total) => { if (getClosures() === closures) status(`${what}… ${done}/${total}`); }
     });
-    results = chokepoints; render(); showChokepoints(results);
-    $('chokeHint').textContent = results.length
-      ? `Ranked by extra travel time across ${trips} trips between ${demand.length} popular places${getClosures().length ? ' (with your current closures)' : ''}.`
-      : 'No single road closure changes these trips.';
-  } catch (e) {
-    $('chokeHint').textContent = 'Could not analyse the network (' + e.message + ').';
-  } finally { busy = false; $('chokeBtn').disabled = false; }
+    if (signal.aborted) return;
+    display(cached = { closures, chokepoints, trips, examined });
+  } catch {
+    if (!signal.aborted) status('Could not analyze the road network. Try finding critical roads again.');
+  } finally {
+    const restoreFocus = document.activeElement === $('chokeCancel');
+    controller = null;
+    $('chokeCancel').hidden = true;
+    $('chokeBtn').disabled = false;
+    if (restoreFocus) $('chokeBtn').focus();
+  }
+}
+
+function display({ closures, chokepoints, trips, examined }) {
+  results = chokepoints; shown = !!results.length; render();
+  if (shown && !$('analyzePanel').hidden && !$('panel').hidden) showChokepoints(results);
+  const scope = `${examined} links tested · ${trips} routed trips · ${fmtClosureCount(closures.length)}.`;
+  status(results.length ? scope : `${scope} No tested closure increased the score.`);
 }
 
 export function initChokepoints() {
+  on('graph:ready', g => { base = g; cached = undefined; $('chokeBtn').disabled = false; });
+  on('workspace:changed', mode => {
+    if (mode === 'analyze' && shown) {
+      $('chokeList').querySelector('[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
+      showChokepoints(results);
+    }
+    else clearChokepoints();
+  });
+  on('closures:changed', () => {
+    cached = undefined;
+    if (!results.length && !controller) return;
+    controller?.abort();
+    results = []; shown = false; render(); clearChokepoints();
+    status('Closures changed. Run the analysis again for an updated ranking.');
+  });
+
   $('chokeBtn').onclick = analyze;
-  $('chokeClear').onclick = () => { results = []; render(); clearChokepoints(); $('chokeHint').textContent = 'Finds the roads whose closure would hurt trips between popular places the most.'; };
+  $('chokeCancel').onclick = () => { controller?.abort(); status('Analysis cancelled.'); };
+  $('chokeClear').onclick = () => {
+    shown = !shown;
+    if (shown) showChokepoints(results); else clearChokepoints();
+    $('chokeClear').textContent = shown ? 'Hide highlights' : 'Show highlights';
+    $('chokeList').querySelector('[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
+  };
   $('chokeList').onclick = e => {
     const close = e.target.closest('[data-close]');
     if (close) {
       const c = results[+close.dataset.close];
-      addLinkClosure(c.coords, c.keys);
-      setMessage(`Closed ${c.name}. Run an algorithm to see the detour, or find critical roads again to see the next weakest link.`);
+      if (addLinkClosure(c.keys, c.name)) {
+        setMessage(`Closed ${c.name}. Open Disrupt to review the closure and route impact.`);
+        $('chokeBtn').focus();
+      }
       return;
     }
-    const li = e.target.closest('[data-i]'); if (li) focusChokepoint(+li.dataset.i);
+    const preview = e.target.closest('[data-preview]');
+    if (preview) {
+      if (!shown) { shown = true; showChokepoints(results); $('chokeClear').textContent = 'Hide highlights'; }
+      $('chokeList').querySelector('[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
+      preview.setAttribute('aria-pressed', 'true');
+      focusChokepoint(+preview.dataset.preview);
+    }
   };
 }
