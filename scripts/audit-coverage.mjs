@@ -1,14 +1,33 @@
 /* Usage: node scripts/audit-coverage.mjs [DPWH GeoJSON in EPSG:4326] [DATASET] */
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
+import assert from 'node:assert/strict';
 import { DEFAULT_START, PLACES, ROADS_URL } from '../js/config.js';
 import { decodeRoadGraph, reverseAdjacency, snapRoutePoint } from '../js/graph/road-graph.js';
+import { hav } from '../js/utils/geo.js';
 
 const file = process.argv[3] || new URL('../' + ROADS_URL, import.meta.url);
 const bytes = readFileSync(file);
 const snapshot = JSON.parse(String(file).endsWith('.gz') ? gunzipSync(bytes) : bytes);
 const graph = decodeRoadGraph(snapshot);
 const reverse = reverseAdjacency(graph);
+if (snapshot.nodeIds) {
+  assert.equal(snapshot.nodeIds.length, graph.lat.length);
+  assert.equal(new Set(snapshot.nodeIds).size, graph.lat.length);
+}
+assert.equal(reverse.vertices.length, graph.edgeCount);
+for (let u = 0; u < graph.lat.length; u++) {
+  const targets = new Set();
+  for (const [v, distance, speed] of graph.adj[u]) {
+    assert.ok(Number.isInteger(v) && v >= 0 && v < graph.lat.length && !targets.has(v));
+    assert.equal(distance, Math.max(.01, hav(graph.lat[u], graph.lng[u], graph.lat[v], graph.lng[v])));
+    assert.ok(Number.isFinite(speed) && speed > 0);
+    targets.add(v);
+  }
+  for (let edge = reverse.offsets[u]; edge < reverse.offsets[u + 1]; edge++) {
+    assert.equal(graph.adj[reverse.vertices[edge]][reverse.indices[edge]][0], u);
+  }
+}
 const vertices = graph.lat.map((_, i) => i);
 const forward = i => graph.adj[i].map(([v]) => v);
 const incoming = i => reverse.vertices.subarray(reverse.offsets[i], reverse.offsets[i + 1]);
@@ -74,7 +93,7 @@ function distribution({ sizes }) {
 }
 
 console.log(JSON.stringify({
-  snapshot: snapshot.osm3s.timestamp_osm_base,
+  snapshot: snapshot.osm3s?.timestamp_osm_base ?? snapshot.replicationTimestamp,
   vertices: vertices.length,
   usableVertices: usable.length,
   directedEdges: graph.adj.reduce((total, edges) => total + edges.length, 0),

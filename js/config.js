@@ -8,6 +8,7 @@ export const PLACES = {
   "Iloilo Esplanade":[10.7075,122.5530],
   "SM City Iloilo":[10.71417,122.55106],
   "University of San Agustin":[10.699222,122.561824],
+  "West Visayas State University":[10.713611,122.5624994],
   "Smallville Complex":[10.7155,122.5465],
   "Iloilo Convention Center":[10.7105,122.5440],
   // Terminal parking area off Airport Access Road (OSM way 245283704).
@@ -24,6 +25,14 @@ export const ROADS_URL = 'data/panay-roads.json.gz';
 export const PHOTON_URL = 'https://photon.komoot.io/api/';
 export const ROUTE_SNAP_LIMIT_METRES = 1500;
 export const ROUTE_ROAD_PROXIMITY_METRES = 250;
+
+// The campus area's OSM representative point is inside restricted internal roads.
+// This attachment is the existing Luna Street vertex outside those roads (OSM node 10688195805).
+export const PLACE_ROAD_ACCESS = [{
+  location: PLACES['West Visayas State University'],
+  road: [10.7142023, 122.5635554],
+  name: 'Luna Street public-road access'
+}];
 
 // These fixed class speeds model estimated travel time in both routing and analysis.
 export const SPEED = {motorway:80,trunk:60,primary:50,secondary:40,tertiary:35,unclassified:30,residential:25,living_street:15,

@@ -6,8 +6,7 @@ import { runInSlices } from '../utils/work-slices.js';
 
 export const placeGeocoder = {
   name: 'Photon', credit: 'https://photon.komoot.io/',
-  url(query) {
-    const [lat, lon] = MAP_CENTER;
+  url(query, [lat, lon] = MAP_CENTER) {
     return PHOTON_URL + '?' + new URLSearchParams({
       q: query, limit: 12, lat, lon, zoom: 9, location_bias_scale: 0.65
     });
@@ -95,13 +94,19 @@ export async function cityPlaceIndex(data) {
       }
       if (i % 128 === 127) yield;
     }
-    return query => {
+    const find = query => {
       const terms = nameTerms(query);
       const bucket = term => prefixes.get(term.slice(0, 2)) || [];
       const anchors = terms.filter(term => !cityTerms.some(part => part.startsWith(term)));
       if (anchors.length) return anchors.map(bucket).reduce((smallest, list) => list.length < smallest.length ? list : smallest);
       return [...new Set(terms.flatMap(bucket))];
     };
+    // Keep a small candidate set for empty-field suggestions, independent of query indexing.
+    const landmarkKinds = new Set(['Landmark', 'Park or public space', 'Government', 'Shopping centre', 'University', 'Terminal']);
+    find.landmarks = data.entries.filter(row => landmarkKinds.has(data.kinds[row[4]])).slice(0, 150)
+      .map(([id, name, lat, lng, kind]) => ({ id, name, ll: [lat / 1e6, lng / 1e6],
+        local: true, detail: `${data.kinds[kind]} · ${data.city}` }));
+    return find;
   }
   return (await runInSlices(build(), { stride: 1 })).value;
 }

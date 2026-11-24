@@ -27,8 +27,10 @@ test('routing region loads only on selection, preserves the active graph on fail
   assert.deepEqual(requests, []);
   await registry.select(west);
   assert.equal(registry.currentTrip(anchor, destination), built);
-  assert.deepEqual(await registry.forTrip(anchor, eastPoint, 'fast'), { reason: 'differentRegions' });
-  await assert.rejects(registry.forTrip(eastPoint, eastEnd, 'fast'), /Server unavailable/);
+  assert.deepEqual(registry.suggestTrip(anchor, eastPoint), { reason: 'differentRegions' });
+  assert.deepEqual(registry.suggestTrip(eastPoint, eastEnd), { reason: 'outsideActive', alternative: east });
+  assert.deepEqual(requests, ['west'], 'offering a network does not request it');
+  await assert.rejects(registry.select(east), /Server unavailable/);
   assert.equal(registry.active.graph, built);
   assert.deepEqual(requests, ['west', 'east']);
 });
@@ -47,7 +49,7 @@ test('a per-trip response from a cancelled load cannot activate a stale graph', 
     activate: candidate => activations.push(candidate.region.id)
   });
   await registry.select(west);
-  const stale = registry.forTrip(eastPoint, eastEnd, 'fast');
+  const stale = registry.select(east);
   await loading;
   const wanted = registry.select(west);
   finish(built);
@@ -56,7 +58,7 @@ test('a per-trip response from a cancelled load cannot activate a stale graph', 
   assert.deepEqual(activations, ['west']);
 });
 
-test('overlapping extents require actual snaps and preserve an already connected active scenario', async () => {
+test('overlapping extents require actual snaps and can only switch with an explicit selection', async () => {
   const overlap = { ...west, id: 'overlap', url: 'overlap' };
   const unusable = decodeRoadGraph({ ...source, coordinates: [100000000, 1210000000, 100010000, 1210010000] });
   const connected = decodeRoadGraph(source);
@@ -65,9 +67,14 @@ test('overlapping extents require actual snaps and preserve an already connected
     requests.push(url);
     return url === 'west' ? unusable : connected;
   } });
-  assert.equal((await registry.forTrip(anchor, destination, 'fast')).graph, connected);
+  await registry.select(west);
+  assert.equal(registry.currentTrip(anchor, destination), undefined);
+  assert.deepEqual(registry.suggestTrip(anchor, destination), { reason: 'noRoad', alternative: overlap });
+  assert.equal(registry.active.region, west);
+  assert.equal((await registry.select(overlap)).graph, connected);
   assert.equal(registry.active.region, overlap);
-  assert.equal((await registry.forTrip(anchor, destination, 'short')).graph, connected);
+  assert.equal(registry.currentTrip(anchor, destination), connected);
+  assert.equal(registry.currentTrip(destination, anchor), connected);
   assert.deepEqual(requests, ['west', 'overlap']);
 });
 
@@ -84,6 +91,13 @@ test('verified assets match the declared checksums, identity and sample points',
     assert.equal(data.replicationTimestamp, region.version);
     assert.equal(data.nodeIds.length, region.vertices);
     assert.equal(data.wayIds.length, data.ways.length);
+    if (region.coverageUrl) {
+      const shape = readFileSync(new URL('../' + region.coverageUrl, import.meta.url));
+      assert.equal(region.coverageSha256, createHash('sha256').update(shape).digest('hex'));
+      assert.equal(region.boundarySha256, data.boundarySha256);
+      const feature = JSON.parse(gunzipSync(shape));
+      assert.equal(feature.properties.scope ?? 'ph-' + feature.properties.adm1_psgc, region.id);
+    }
     assert.ok(region.demand.every(i => Number.isInteger(i) && i >= 0 && i < region.vertices));
   }
 });

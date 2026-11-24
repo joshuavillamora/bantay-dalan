@@ -1,7 +1,5 @@
-/* Only the active graph and one candidate are held by the loader. */
+/* Keep the active graph usable until the explicitly requested network is ready. */
 import { ROUTE_ROAD_PROXIMITY_METRES } from '../config.js';
-import { astar } from '../algorithms/astar.js';
-import { runInSlices } from '../utils/work-slices.js';
 import { fetchRoadGraph, snapRouteEndpoints } from './road-graph.js';
 
 export function pointInRegion(region, [lat, lng]) {
@@ -20,7 +18,8 @@ export function createRegionManager(regions, { load = fetchRoadGraph, progress =
   };
   const cancel = () => request?.abort();
 
-  async function run(action) {
+  async function select(region) {
+    if (!regions.includes(region)) throw Error('Unknown road network');
     cancel();
     const job = request = new AbortController();
     const { signal } = job;
@@ -28,28 +27,20 @@ export function createRegionManager(regions, { load = fetchRoadGraph, progress =
     let finish;
     settled = new Promise(resolve => { finish = resolve; });
     const notify = (region, phase, percent) => { if (request === job) progress(region, phase, percent); };
-    const read = async region => {
-      if (active?.region === region) return active;
-      notify(region, 'Requesting roads');
-      const graph = await load(region.url, {
-        dataset: region, signal, onProgress: (phase, percent) => notify(region, phase, percent)
-      });
-      signal.throwIfAborted();
-      return { region, graph };
-    };
-    const commit = candidate => {
-      signal.throwIfAborted();
-      if (candidate !== active) {
-        active = candidate;
-        activate(candidate);
-      }
-      return { graph: active.graph };
-    };
     try {
       // Let the aborted job release its candidate before starting another graph load.
       await prior;
       signal.throwIfAborted();
-      return await action(read, commit, signal, notify);
+      if (active?.region !== region) {
+        notify(region, 'Requesting roads');
+        const graph = await load(region.url, {
+          dataset: region, signal, onProgress: (phase, percent) => notify(region, phase, percent)
+        });
+        signal.throwIfAborted();
+        active = { region, graph };
+        activate(active);
+      }
+      return { graph: active.graph };
     }
     catch (error) {
       if (signal.aborted) return { cancelled: true };
@@ -64,40 +55,19 @@ export function createRegionManager(regions, { load = fetchRoadGraph, progress =
     get active() { return active; },
     forPoint,
     currentTrip(start, end) {
-      const candidates = forPair(start, end);
-      if (candidates.length !== 1 || candidates[0] !== active?.region) return;
+      if (!active || !start || !end) return;
       const { s, t } = snapRouteEndpoints(active.graph, start, end);
       if (s < 0 || t < 0) return;
-      cancel();
       return active.graph;
     },
     cancel,
-    select: region => run(async (read, commit) => commit(await read(region))),
-    forTrip: (start, end, mode) => run(async (read, commit, signal, notify) => {
+    select,
+    suggestTrip(start, end) {
       if (!forPoint(start).length || !forPoint(end).length) return { reason: 'outside' };
       const candidates = forPair(start, end);
       if (!candidates.length) return { reason: 'differentRegions' };
-      // Keep the current scenario in an overlap if it already models the journey.
-      if (active && candidates.includes(active.region)) {
-        candidates.splice(candidates.indexOf(active.region), 1);
-        candidates.unshift(active.region);
-      }
-      let activeDisconnected = false, disconnected = false;
-      for (const region of candidates) {
-        const candidate = await read(region);
-        const { graph } = candidate;
-        const { s, t } = snapRouteEndpoints(graph, start, end);
-        if (s < 0 || t < 0) continue;
-        if (candidates.length === 1) return commit(candidate);
-        notify(region, 'Checking connections');
-        const path = await runInSlices(astar(graph, s, t, mode), { keepGoing: () => !signal.aborted });
-        signal.throwIfAborted();
-        if (path.value) return commit(candidate);
-        activeDisconnected ||= candidate === active;
-        disconnected = true;
-      }
-      if (activeDisconnected) return commit(active);
-      return { reason: disconnected ? 'disconnected' : 'noRoad' };
-    })
+      const alternative = candidates.find(region => region !== active?.region);
+      return { reason: !candidates.includes(active?.region) ? 'outsideActive' : 'noRoad', alternative };
+    }
   };
 }

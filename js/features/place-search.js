@@ -1,6 +1,7 @@
 /* Autocomplete only commits coordinates once the user picks a suggestion. */
 import { state } from '../state.js';
-import { map } from '../map/map.js';
+import { map, fitTrip } from '../map/map.js';
+import { snapRoutePoint } from '../graph/road-graph.js';
 import { on } from '../events.js';
 import { $ } from '../utils/dom.js';
 import { esc } from '../utils/format.js';
@@ -10,10 +11,12 @@ import { canSearchOnline, cityPlaceIndex, placeGeocoder, geocodedMatches, mergeM
 import { connectionMessage } from './route-status.js';
 import { regionsForPoint } from './routing-region.js';
 import { regionalPlaceIndexes } from './offline-places.js';
+import { regionLabel } from '../ui/region-labels.js';
 
 const suggested = [
   { name: 'Plaza Libertad', id: 'way/49424474', detail: 'City Proper, Iloilo City', aliases: ['Plaza Alfonso XII'] },
   { name: 'SM City Iloilo', id: 'way/169812356', detail: 'Mandurriao, Iloilo City' },
+  { name: 'West Visayas State University', id: 'relation/15534373', detail: 'Main campus · Luna Street, La Paz', aliases: ['WVSU'] },
   { name: 'Jaro Cathedral', id: 'way/222460850', detail: 'Jaro, Iloilo City',
     aliases: ['Jaro Metropolitan Cathedral', 'Cathedral of Santa Isabel de Hungría', 'Cathedral of Saint Elizabeth of Hungary'] },
   { name: 'University of San Agustin', id: 'relation/10668922', detail: 'General Luna Avenue, Iloilo City',
@@ -29,6 +32,7 @@ function attach(input, which, session) {
   const popup = $(input.id + 'Suggest'), heading = $(input.id + 'SuggestedHeading');
   const list = $(input.id + 'List'), status = $(input.id + 'SearchStatus');
   let items = [], active = -1, timer, request, revision = 0, editing = false, previousRows = '';
+  let suggesting = false;
 
   function markActive(scroll = false) {
     for (const [index, row] of Array.from(list.children).entries()) {
@@ -45,7 +49,7 @@ function attach(input, which, session) {
   function render(message = '', showHeading = false) {
     const rows = items.map((place, index) => {
       const candidate = place.roadIssue && regionsForPoint(place.ll).find(region => region !== session.graph?.region);
-      const roadNote = candidate ? candidate.name + ' road network available' : place.roadIssue && connectionMessage(place.roadIssue);
+      const roadNote = candidate ? regionLabel(candidate) + ' road network available' : place.roadIssue && connectionMessage(place.roadIssue);
       const note = [place.detail, place.local && 'Local index', roadNote].filter(Boolean).join(' · ');
       return `<li class="opt" role="option" id="${input.id}Opt${index}" data-index="${index}">
         <strong>${esc(place.name)}</strong>${note ? `<small>${esc(note)}</small>` : ''}
@@ -69,18 +73,31 @@ function attach(input, which, session) {
 
   function dismiss() {
     cancel();
-    editing = false; items = []; active = -1;
+    editing = suggesting = false; items = []; active = -1;
     render();
     input.value = state.names[which];
   }
 
   function showSuggested() {
-    items = suggested; active = -1;
+    suggesting = true;
+    const graph = session.graph;
+    const local = !graph || /^(iloilo-|panay-guimaras)/.test(graph.region?.id) ? suggested : [];
+    const candidates = [...local, ...(session.regional?.landmarks(graph?.region) ?? [])];
+    items = [];
+    const names = new Set();
+    for (const place of candidates) {
+      if (items.length === 5) break;
+      if (names.has(place.name) || graph && snapRoutePoint(graph, place.ll).i < 0) continue;
+      names.add(place.name);
+      items.push(place);
+    }
+    active = -1;
     render('', true);
   }
 
   function update() {
     cancel();
+    suggesting = false;
     editing = true;
     const query = input.value.trim().replace(/\s+/g, ' ');
     const key = placeWords(query);
@@ -107,7 +124,7 @@ function attach(input, which, session) {
       active = selected ? items.indexOf(selected) : -1;
       render(items.length ? '' : noResults);
     };
-    const cacheKey = query.toLowerCase();
+    const cacheKey = `${session.graph?.region?.id}/${key}`;
     const cached = session.cache.get(cacheKey);
     if (cached && cached.until > Date.now()) { apply(cached.features); return; }
     if (Date.now() < session.retryAfter) { render(unavailable); return; }
@@ -120,7 +137,7 @@ function attach(input, which, session) {
       const timeout = setTimeout(() => controller.abort(), 6000);
       session.nextRequest = Date.now() + 1000;
       try {
-        const response = await fetch(placeGeocoder.url(query), {
+        const response = await fetch(placeGeocoder.url(query, [center.lat, center.lng]), {
           signal: controller.signal, credentials: 'omit'
         });
         if (id !== revision) return;
@@ -150,7 +167,10 @@ function attach(input, which, session) {
     setPoint(which, place.ll, place.name);
     dismiss();
     const zoom = !place.zoom || place.nearRoad ? Math.max(14, map.getZoom()) : place.zoom;
-    map.setView(place.ll, zoom, { animate: false });
+    const graph = session.graph;
+    if (which === 'e' && graph && snapRoutePoint(graph, state.start).i >= 0 && snapRoutePoint(graph, place.ll).i >= 0) {
+      fitTrip([state.start, state.end], 16);
+    } else map.setView(place.ll, zoom, { animate: false });
   }
 
   input.addEventListener('focus', () => {
@@ -192,7 +212,11 @@ function attach(input, which, session) {
     if (row) { choose(Number(row.dataset.index)); input.blur(); }
   });
 
-  return { dismiss, refresh: () => { if (editing && document.activeElement === input) update(); } };
+  return { dismiss, refresh: () => {
+    if (document.activeElement !== input) return;
+    if (editing && !suggesting) update();
+    else if (suggesting) showSuggested();
+  } };
 }
 
 export function initPlaceSearch() {

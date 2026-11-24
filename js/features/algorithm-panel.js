@@ -7,9 +7,19 @@ export const selectedAlgorithm = () => $('algo').value;
 
 export function initAlgorithmPanel() {
   const select = $('algo');
-  select.innerHTML = Object.entries(ALGORITHMS).filter(([, algo]) => !algo.baseline)
-    .map(([id, algo]) => `<option value="${id}">${algo.name}</option>`).join('');
-  const showInfo = () => { $('info').textContent = ALGORITHMS[select.value]?.info ?? ''; };
+  for (const [label, baseline] of [['Evaluated algorithms', false], ['Reference algorithm', true]]) {
+    const group = document.createElement('optgroup');
+    group.label = label;
+    for (const [id, algorithm] of Object.entries(ALGORITHMS)) {
+      if (Boolean(algorithm.baseline) !== baseline) continue;
+      group.append(new Option(baseline ? 'Standard Dijkstra (baseline)' : algorithm.name, id));
+    }
+    select.append(group);
+  }
+  const showInfo = () => {
+    const algorithm = ALGORITHMS[select.value];
+    $('info').textContent = algorithm.baseline ? 'Reference search for verifying optimized costs.' : algorithm.info;
+  };
   select.onchange = () => { showInfo(); emit('settings:changed', 'algorithm'); };
   showInfo();
 

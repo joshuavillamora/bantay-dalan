@@ -18,6 +18,14 @@ import { cancelRegionLoad, currentTripGraph, prepareTripRegion } from './routing
 
 let base, searchView;
 const stepsPerFrame = () => Math.pow(10, (+$('spd').value - 25) / 25);
+function showRunStatus(run) {
+  // The generator computes while yielding steps to the map. There is no
+  // second replay of a finished computation behind this status.
+  setStatus(run.preparing ? 'Preparing road directions…'
+    : run.repair ? 'LPA* is repairing the route…'
+    : run.visual && !run.skip ? `Visualizing ${run.name} search…`
+    : 'Computing route…');
+}
 
 function cancelRun() {
   state.runId++;
@@ -96,15 +104,18 @@ function startRun({ visual = false, changed = false, repair = false } = {}) {
       failedSearchView(error);
     }
   }
-  setStatus(repair ? 'LPA* is repairing the route…' : visual ? `${run.name} is searching…` : 'Finding route…');
   run.preparing = key !== 'astar' && !run.graph.radj;
+  showRunStatus(run);
   refreshControls();
   if (run.preparing) {
     prepareReverseAdjacency(run.graph).then(() => {
       if (state.run !== run) return;
       run.preparing = false;
       refreshControls();
-      if (!state.paused) state.raf = requestAnimationFrame(frame);
+      if (!state.paused) {
+        showRunStatus(run);
+        state.raf = requestAnimationFrame(frame);
+      }
     }, error => { if (state.run === run) failedRun(error); });
   } else state.raf = requestAnimationFrame(frame);
 }
@@ -265,7 +276,7 @@ export function initRunController() {
     state.paused = !state.paused;
     cancelAnimationFrame(state.raf);
     if (state.paused) setStatus('Search paused');
-    else { setStatus(state.run.repair ? 'LPA* is repairing the route…' : `${state.run.name} is searching…`); frame(); }
+    else { showRunStatus(state.run); frame(); }
     refreshControls();
   };
   $('step').onclick = () => { if (state.run && !state.run.preparing && state.paused) advance(1); };
@@ -274,6 +285,7 @@ export function initRunController() {
     cancelAnimationFrame(state.raf);
     state.run.skip = true;
     state.paused = false;
+    showRunStatus(state.run);
     refreshControls();
     if (!state.run.preparing) state.raf = requestAnimationFrame(frame);
   };

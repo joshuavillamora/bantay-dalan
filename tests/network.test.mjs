@@ -310,7 +310,7 @@ test('local roads support real cross-municipality trips while Guimaras stays dis
   const closures = [{ keys: new Set(graph.adj[s].map(([v]) => s * graph.lat.length + v)) }];
   const closed = removeClosedRoads(graph, closures);
   assert.equal(verifySearches(closed, s, t, 'short'), null);
-  assert.equal(noRouteMessage(graph, s, t, 'short', true), 'These locations are not connected in the modeled road network.');
+  assert.equal(noRouteMessage(graph, s, t, 'short', true), 'No route was found between these locations in the selected road network.');
   assert.equal(verifySearches(closed, s, endpoints.t, 'short'), null);
   assert.equal(noRouteMessage(graph, s, endpoints.t, 'short', true), 'No route is available under the current road closures.');
 });
@@ -374,6 +374,58 @@ test('the three primary searches match Dijkstra in both modes and directions', (
     assert.ok(verifySearches(graph, s, t, mode));
     assert.ok(verifySearches(graph, t, s, mode));
     assert.deepEqual(verifySearches(graph, s, s, mode), [s]);
+  }
+});
+
+test('four algorithms match independently calculated optima on a directed weighted graph', () => {
+  const tiny = {
+    lat: [0, 0, .0001, .0001, .0002], lng: [0, .0001, 0, .0001, .0002],
+    adj: [[[1, 20, 20, 0], [2, 30, 60, 0], [3, 80, 70, 0]],
+      [[3, 20, 20, 0]], [[3, 35, 60, 0]], [], []]
+  };
+  for (const [mode, want, expected] of [['short', [0, 1, 3], 40], ['fast', [0, 2, 3], 3.9]]) {
+    const found = verifySearches(tiny, 0, 3, mode);
+    assert.deepEqual(found, want);
+    assert.ok(Math.abs(routeMetrics(tiny, found)[mode === 'short' ? 'dist' : 'time'] - expected) < 1e-10);
+    assert.equal(verifySearches(tiny, 3, 0, mode), null);
+    assert.equal(verifySearches(tiny, 0, 4, mode), null);
+    assert.deepEqual(verifySearches(tiny, 0, 0, mode), [0]);
+    assert.match(noRouteMessage(tiny, 3, 0, mode, false), /in this direction/);
+  }
+});
+
+test('WVSU public-road access routes on three real graphs without bypassing closures', () => {
+  const campus = PLACES['West Visayas State University'];
+  for (const [asset, expected, plazaVertex] of [
+    [null, 342491, 431709],
+    ['iloilo-city-province', 172957, 209586],
+    ['iloilo-city', undefined, undefined]
+  ]) {
+    const regionGraph = asset
+      ? decodeRoadGraph(JSON.parse(gunzipSync(readFileSync(new URL(`../data/regions/${asset}.json.gz`, import.meta.url)))))
+      : graph;
+    const access = snapRoutePoint(regionGraph, campus);
+    assert.equal(access.access, 'Luna Street public-road access');
+    assert.equal(Math.round(access.d), 133);
+    assert.deepEqual([regionGraph.lat[access.i], regionGraph.lng[access.i]], [10.7142023, 122.5635554]);
+    const { s, t } = snapRouteEndpoints(regionGraph, campus, PLACES[DEFAULT_START]);
+    if (expected !== undefined) assert.deepEqual([s, t], [expected, plazaVertex]);
+    const fragment = snapRoutePoint(regionGraph, [10.7133171, 122.563348]).i;
+    assert.notEqual(fragment, s);
+    for (const mode of ['fast', 'short']) {
+      assert.equal(verifySearches(regionGraph, fragment, t, mode), null);
+      assert.ok(verifySearches(regionGraph, t, s, mode));
+      const open = verifySearches(regionGraph, s, t, mode);
+      assert.ok(open);
+      assert.ok(verifySearches(regionGraph, t, snapRoutePoint(regionGraph, PLACES[DEFAULT_END]).i, mode));
+      assert.ok(verifySearches(regionGraph, s, snapRoutePoint(regionGraph, PLACES['Molo Church']).i, mode));
+      assertOptimal(regionGraph, s, t, mode, finish(ALGORITHMS.lpa.run(regionGraph, s, t, mode, [])), open);
+      const closures = [{ keys: new Set(regionGraph.adj[s].map(([v]) => s * regionGraph.lat.length + v)) }];
+      assert.equal(verifySearches(removeClosedRoads(regionGraph, closures), s, t, mode), null);
+      assert.equal(finish(lpaRepair(closures)), null);
+      assertOptimal(regionGraph, s, t, mode, finish(lpaRepair([])), open);
+      lpaReset();
+    }
   }
 });
 

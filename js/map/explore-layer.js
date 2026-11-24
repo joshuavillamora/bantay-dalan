@@ -33,7 +33,7 @@ const ExploreLayer = L.Layer.extend({
   },
   reset() {
     const m = this._map, size = m.getSize();
-    this.photo = m.getContainer().classList.contains('photo-basemap');
+    this.photo = m.getContainer().matches('.photo-basemap, .network-basemap');
     const ratio = devicePixelRatio || 1;
     this.size = size;
     L.DomUtil.setPosition(this.canvas, m.containerPointToLayerPoint([0, 0]));

@@ -5,20 +5,27 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { blockedNode, directions } from './osm-driving.mjs';
 
-const [pbf, boundaryFile, work, output] = process.argv.slice(2);
+const [pbf, boundaryFile, work, output, mode, placeSource] = process.argv.slice(2);
 if (!output) throw Error('Usage: node scripts/extract-roads.mjs PHILIPPINES_PBF MUNICIPALITIES_GEOJSON PARSER_PREFIX OUTPUT_DIR');
+const iloilo = mode === '--iloilo';
 const require = createRequire(resolve(work, 'package.json'));
 const parser = require('osm-pbf-parser');
 const parserCodecs = require('osm-pbf-parser/lib/parsers');
 const source = 'https://download.geofabrik.de/asia/philippines.html';
-const provinces = ['Iloilo', 'Guimaras', 'Antique', 'Capiz', 'Aklan'];
+const provinces = iloilo ? ['Iloilo'] : ['Iloilo', 'Guimaras', 'Antique', 'Capiz', 'Aklan'];
 const classes = ['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link',
   'tertiary', 'tertiary_link', 'unclassified', 'residential', 'living_street', 'service', 'track'];
 const { features } = JSON.parse(readFileSync(boundaryFile));
+if (iloilo) {
+  const units = features.filter(({ properties }) => properties.PROVINCE === 'Iloilo' || properties.MUN_CODE === '063022000');
+  if (new Set(units.map(unit => unit.properties.MUN_CODE)).size !== 44 ||
+      !units.some(unit => unit.properties.MUN_CODE === '063022000')) throw Error('Expected Iloilo City and 43 provincial LGUs');
+}
 const polygons = features.flatMap(({ geometry, properties }) => {
-  const province = provinces.indexOf(properties.PROVINCE);
+  const province = provinces.indexOf(iloilo && properties.MUN_CODE === '063022000' ? 'Iloilo' : properties.PROVINCE);
   if (province < 0 || !geometry) return [];
   const parts = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
   return parts.map(([ring, ...holes]) => {
@@ -65,7 +72,7 @@ function candidate(scope, mask, filename) {
   return { scope, mask, filename, coords: [], ways: [], names: [], nodes: new Map(), nameIDs: new Map(),
     wayIDs: new Set(), restrictions: 0, barriers: new Set(), missing: 0, classWays: Object.create(null) };
 }
-const candidates = [
+const candidates = iloilo ? [candidate('iloilo-city-province', 1, 'iloilo-city-province.json.gz')] : [
   candidate('Iloilo and Guimaras', 3, 'iloilo-candidate.json'),
   candidate('Panay and Guimaras', 31, 'panay-candidate.json')
 ];
@@ -110,6 +117,7 @@ function readWay(row) {
     const finish = () => {
       if (run.length >= 2) {
         c.ways.push([roadClass, flags, c.nameIDs.get(name), run.map(id => wayCoordinate(c, id))]);
+        if (iloilo) (c.wayRunIds ??= []).push(row.id);
         c.wayIDs.add(row.id);
         c.classWays[tags.highway] = (c.classWays[tags.highway] || 0) + 1;
       }
@@ -120,6 +128,9 @@ function readWay(row) {
       if (!p || p.blocked) {
         if (!p) c.missing++;
         else c.barriers.add(id);
+        finish();
+      } else if (iloilo && !(scopeMask(p) & c.mask)) {
+        // Keep original way runs inside the municipal union. Never bridge removed nodes.
         finish();
       } else if (run.at(-1) !== id) run.push(id);
     }
@@ -158,6 +169,32 @@ for (const c of candidates) {
       missingNodeReferences: c.missing, unmodeledRestrictionRelationsTouchingIncludedWays: c.restrictions },
     classes, names: c.names, coordinates: c.coords, ways: c.ways
   };
-  writeFileSync(join(output, c.filename), JSON.stringify(data) + '\n');
+  if (iloilo) {
+    Object.assign(data, { replicationTimestamp: stamp, nodeIds: [...c.nodes.keys()], wayIds: c.wayRunIds });
+    writeFileSync(join(output, c.filename), gzipSync(JSON.stringify(data), { level: 9 }));
+  } else writeFileSync(join(output, c.filename), JSON.stringify(data) + '\n');
   console.log(c.scope, c.nodes.size, c.ways.length, JSON.stringify(data.extraction));
+}
+if (iloilo && placeSource) {
+  const index = JSON.parse(gunzipSync(readFileSync(placeSource)));
+  if (index.pbfSha256 !== pbfSha256) throw Error('Place index must come from the same OSM snapshot');
+  const { coords } = candidates[0];
+  const bounds = [Infinity, Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < coords.length; i += 2) {
+    const lat = coords[i] / 1e7, lon = coords[i + 1] / 1e7;
+    bounds[0] = Math.min(bounds[0], lon);
+    bounds[1] = Math.min(bounds[1], lat);
+    bounds[2] = Math.max(bounds[2], lon);
+    bounds[3] = Math.max(bounds[3], lat);
+  }
+  const [west, south, east, north] = bounds;
+  const entries = index.entries.filter(([, , y, x]) => {
+    const lat = y / 1e6, lon = x / 1e6;
+    return lat >= south && lat <= north && lon >= west && lon <= east && scopeMask({ lat, lon });
+  });
+  if (!entries.length) throw Error('No places inside the Iloilo graph extent');
+  writeFileSync(join(output, 'iloilo-city-province-places.json.gz'), gzipSync(JSON.stringify({
+    ...index, city: 'Iloilo City and Province', boundarySha256, entries
+  }), { level: 9 }));
+  console.log('Iloilo place entries:', entries.length);
 }

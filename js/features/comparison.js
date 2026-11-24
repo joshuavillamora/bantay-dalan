@@ -6,14 +6,12 @@ import { nextTask, runInSlices } from '../utils/work-slices.js';
 import { state } from '../state.js';
 import { on } from '../events.js';
 import { $ } from '../utils/dom.js';
-import { fmtClosureCount } from '../utils/format.js';
 import { costsAgree, renderResults } from '../ui/results-table.js';
-import { costName } from '../ui/dashboard.js';
 import { getClosures, getRoutingGraph } from './closures.js';
 import { connectionMessage, noRouteMessage } from './route-status.js';
 import { currentTripGraph, prepareTripRegion } from './routing-region.js';
 
-const initialStatus = 'Run all four searches on the current trip.';
+const initialStatus = 'Compare three routing algorithms against the Standard Dijkstra baseline.';
 
 export function initComparison() {
   let base, generation = 0;
@@ -48,7 +46,7 @@ export function initComparison() {
     const id = ++generation;
     $('compareBtn').disabled = true;
     renderResults();
-    status('Running fresh searches…');
+    status('Running comparisons…');
     try {
       await nextTask();
       if (id !== generation) return;
@@ -79,8 +77,8 @@ export function initComparison() {
       renderResults(rows, { graph: base, s, t, mode, closures });
       const disagreement = rows.some(row => !row.baseline && !row.matches);
       const outcome = disagreement ? 'A result differs from the Dijkstra baseline.'
-        : baseline.path ? 'Optimal cost checked against Dijkstra.' : noRouteMessage(base, s, t, mode, closures.length > 0);
-      status(`Comparison completed. ${costName(mode)} · ${fmtClosureCount(closures.length)}. ${outcome}`);
+        : baseline.path ? 'All optimized costs agree.' : noRouteMessage(base, s, t, mode, closures.length > 0);
+      status(`Comparison completed. ${outcome}`);
     } catch (error) {
       if (id === generation) {
         console.error('Algorithm comparison failed', error);

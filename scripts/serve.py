@@ -8,6 +8,13 @@ import re
 
 
 class MapHandler(SimpleHTTPRequestHandler):
+    def end_headers(self):
+        # Revalidate app files when code changes during local development.
+        # Map archives keep their existing byte-range and caching behavior.
+        if Path(self.path.split("?", 1)[0]).suffix != ".pmtiles":
+            self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def send_head(self):
         self.remaining = None
         requested = self.headers.get("Range")
@@ -63,7 +70,8 @@ def main():
     args = parser.parse_args()
     handler = partial(MapHandler, directory=str(Path(__file__).resolve().parents[1]))
     with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
-        print(f"Open http://127.0.0.1:{server.server_port}/?offline=1 for the offline presentation.", flush=True)
+        print(f"Open http://127.0.0.1:{server.server_port}/ for the Iloilo City workbench.", flush=True)
+        print(f"Panay presentation: http://127.0.0.1:{server.server_port}/?offline=1&network=panay-guimaras", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

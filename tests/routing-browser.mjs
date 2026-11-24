@@ -12,6 +12,7 @@ const temp = await mkdtemp(join(tmpdir(), 'chokepoint-browser-'));
 const offline = process.env.CHOKEPOINT_OFFLINE === '1';
 const appUrl = new URL(process.env.BROWSER_BASE_URL || 'http://127.0.0.1:8000/');
 if (offline) appUrl.searchParams.set('offline', '1');
+appUrl.searchParams.set('network', 'panay-guimaras');
 const demo = JSON.parse(await readFile(new URL('../scripts/presentation-fixture.json', import.meta.url), 'utf8'));
 const chrome = process.env.CHROME_BIN || (process.platform === 'darwin'
   ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : 'google-chrome');
@@ -39,19 +40,34 @@ try {
   ws = new WebSocket(tab.webSocketDebuggerUrl);
   await once(ws, 'open');
   const pending = new Map(), uncaught = [], loggedErrors = [], loggedWarnings = [];
-  const external = [], intercepted = [];
-  let denyExternal = offline, missingMaps = false;
+  const external = [], intercepted = [], cancelledRequests = new Set();
+  // Chrome can remove an aborted Leaflet range request before assigning a Network ID.
+  const interceptionErrors = () => intercepted.filter(({ error, networkId, url }) =>
+    error !== 'Invalid InterceptionId.' || !(cancelledRequests.has(networkId) ||
+      (!networkId && new URL(url).pathname.endsWith('.pmtiles'))));
+  let denyExternal = offline, missingMaps = false, startupFault;
   let seq = 0;
   ws.onmessage = ({ data }) => {
     const reply = JSON.parse(data);
+    if (reply.method === 'Network.loadingFailed' && reply.params.canceled) cancelledRequests.add(reply.params.requestId);
     if (reply.method === 'Fetch.requestPaused') {
-      const { requestId, request: { url } } = reply.params;
+      const { requestId, networkId, request: { url } } = reply.params;
+      const report = error => intercepted.push({ error: error.message, networkId, url });
       const resource = new URL(url);
+      if (startupFault && resource.pathname === '/js/utils/format.js') {
+        const missing = startupFault === 'missing';
+        cdp('Fetch.fulfillRequest', {
+          requestId, responseCode: missing ? 404 : 200,
+          responseHeaders: [{ name: 'Content-Type', value: 'text/javascript' }],
+          body: Buffer.from(missing ? 'Module unavailable' : 'export const fmtD = value => value;').toString('base64')
+        }).catch(report);
+        return;
+      }
       const isExternal = resource.origin !== appUrl.origin;
       if (isExternal && denyExternal) external.push(url);
       const denied = isExternal && denyExternal || missingMaps && resource.pathname.endsWith('.pmtiles');
       cdp(denied ? 'Fetch.failRequest' : 'Fetch.continueRequest', denied ? { requestId, errorReason: 'InternetDisconnected' } : { requestId })
-        .catch(error => intercepted.push(error.message));
+        .catch(report);
     }
     if (reply.method === 'Runtime.exceptionThrown') uncaught.push(reply.params.exceptionDetails);
     if (reply.method === 'Runtime.consoleAPICalled' && reply.params.type === 'error') {
@@ -89,7 +105,7 @@ try {
   const reviewClosure = () => waitFor(() => page(() => !$('closeReview').hidden && $('closeQuestion').textContent), 'closure review');
   const mouse = (type, [x, y], buttons = 0) => cdp('Input.dispatchMouseEvent', { type, x, y, buttons, button: 'left', clickCount: 1 });
   const key = async key => {
-    const windowsVirtualKeyCode = key === 'Enter' ? 13 : 27;
+    const windowsVirtualKeyCode = { Enter: 13, Escape: 27, ArrowDown: 40, ArrowUp: 38 }[key];
     await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code: key, windowsVirtualKeyCode });
     if (key === 'Enter') await cdp('Input.dispatchKeyEvent', { type: 'char', key, code: key, text: '\r', windowsVirtualKeyCode });
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode });
@@ -112,16 +128,25 @@ try {
 
   await cdp('Runtime.enable');
   await cdp('Page.enable');
+  await cdp('Network.enable');
+  await cdp('Network.setCacheDisabled', { cacheDisabled: true });
   if (offline) {
-    await cdp('Network.enable');
-    await cdp('Network.setCacheDisabled', { cacheDisabled: true });
     await cdp('Network.setBypassServiceWorker', { bypass: true });
     await cdp('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
   }
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  const defaultUrl = new URL(appUrl);
+  defaultUrl.searchParams.delete('network');
+  await cdp('Page.navigate', { url: defaultUrl.href });
+  await waitFor(() => page(() => document.getElementById('lt')?.textContent === 'Ready to route' &&
+    document.getElementById('routingRegion').value === 'iloilo-city'), 'Iloilo City default startup');
   await cdp('Page.navigate', { url: appUrl.href });
   await waitFor(() => page(() => document.getElementById('lt')?.textContent === 'Ready to route'), 'graph ready');
   await page(async () => {
+    window.openWorkspace = mode => {
+      const button = Array.from(document.querySelectorAll('[data-mode]')).find(button => button.dataset.mode === mode);
+      if (button.getAttribute('aria-expanded') !== 'true') button.click();
+    };
     const modules = await Promise.all([
       import('/js/utils/dom.js'), import('/js/state.js'), import('/js/graph/road-graph.js'), import('/js/algorithms/index.js'),
       import('/js/features/route-points.js'), import('/js/features/closures.js'), import('/js/map/map.js'), import('/js/map/explore-layer.js'),
@@ -151,35 +176,44 @@ try {
   'visible offline vector map');
   await cdp('DOM.enable');
   await cdp('CSS.enable');
-  const assertPlexGlyphs = async selectors => {
+  const assertGeistGlyphs = async selectors => {
     const { root } = await cdp('DOM.getDocument');
     for (const selector of selectors) {
       const { nodeId } = await cdp('DOM.querySelector', { nodeId: root.nodeId, selector });
       assert.ok(nodeId, selector);
-      const { fonts } = await cdp('CSS.getPlatformFontsForNode', { nodeId });
-      assert.ok(fonts.length && fonts.every(font => /^IBMPlexSans(?:-(Regular|Medm|Medium|SmBld|Bold))?$/.test(font.postScriptName)
+      const fonts = await waitFor(async () => {
+        const { fonts } = await cdp('CSS.getPlatformFontsForNode', { nodeId });
+        return fonts.length ? fonts : false;
+      }, selector + ' rendered glyphs', 5000);
+      assert.ok(fonts.length && fonts.every(font => /^Geist/.test(font.postScriptName)
         && font.isCustomFont && font.glyphCount > 0),
         `${selector}: ${JSON.stringify(fonts)}`);
     }
   };
   const typography = await page(async () => {
     const weights = [400, 500, 600, 700];
-    const faces = await Promise.all(weights.map(weight => document.fonts.load(`${weight} 14px "IBM Plex Sans"`, 'CHOKEPOINT')));
+    const faces = await Promise.all(weights.map(weight => document.fonts.load(`${weight} 14px "Geist Sans"`, 'CHOKEPOINT')));
     return {
-      loaded: faces.flat().filter(face => face.status === 'loaded').map(face => Number(face.weight)),
+      loaded: faces.map(group => group.some(face => face.status === 'loaded' && face.family.includes('Geist Sans'))),
       files: performance.getEntriesByType('resource').filter(entry => entry.name.endsWith('.woff2') && entry.encodedBodySize > 0)
         .map(entry => new URL(entry.name)).map(url => [url.origin, url.pathname.split('/').at(-1)]),
-      forms: ['#from', '#to', '#routingRegion', '#mapStyle', '#go'].map(selector =>
+      forms: ['#from', '#to', '#regionPicker', '#mapStyle', '#go'].map(selector =>
         getComputedStyle(document.querySelector(selector)).fontFamily.split(',')[0].replaceAll('"', ''))
     };
   });
-  assert.deepEqual(typography.loaded, [400, 500, 600, 700]);
+  assert.deepEqual(typography.loaded, [true, true, true, true]);
   for (const [origin] of typography.files) assert.equal(origin, appUrl.origin);
   assert.deepEqual(typography.files.map(([, file]) => file).sort(),
-    ['Bold', 'Medium', 'Regular', 'SemiBold'].map(style => `IBMPlexSans-${style}.woff2`));
-  assert.deepEqual(typography.forms, Array(5).fill('IBM Plex Sans'));
-  await assertPlexGlyphs(['.brand h1', '.brand p', '.mode-rail button', '#route-title', '#go', '#lt', '.leaflet-control-zoom-in']);
-  console.log('IBM Plex Sans: four local weights loaded and rendered in app and map controls');
+    ['Geist-Variable.woff2']);
+  assert.deepEqual(typography.forms, Array(5).fill('Geist Sans'));
+  await assertGeistGlyphs(['.brand p', '.mode-rail button', '#go', '#lt', '.leaflet-control-zoom-in']);
+  assert.equal(await page(async () => {
+    const heading = $('route-title');
+    const fonts = await document.fonts.load('25px Anton', heading.textContent);
+    return getComputedStyle(heading).fontFamily.split(',')[0].replaceAll('"', '') === 'Anton' &&
+      fonts.some(face => face.family === 'Anton' && face.status === 'loaded');
+  }), true);
+  console.log('Geist Sans: one local variable font at four weights rendered in app and map controls');
   if (offline) {
     await offlineMapReady();
     const startup = await page(async () => {
@@ -220,29 +254,77 @@ try {
 
   const captureView = async (name, mode) => {
     if (!process.env.UI_SCREENSHOTS) return;
-    if (mode) await page(mode => document.querySelector(`[data-mode=${mode}]`).click(), mode);
+    if (mode) await page(mode => openWorkspace(mode), mode);
     await sleep(340);
     const { data } = await cdp('Page.captureScreenshot', { format: 'png' });
     await writeFile(join(process.env.UI_SCREENSHOTS, name + '.png'), Buffer.from(data, 'base64'));
-    if (mode) await page(() => document.querySelector('[data-mode=compare]').click());
+    if (mode) await page(() => openWorkspace('compare'));
   };
   const allCostsAgree = () => page(() => $('comparisonStatus').classList.contains('comparison-success') &&
     $('res').querySelectorAll('tbody tr').length === 4);
   await click('help');
-  await assertPlexGlyphs(['#wTitle', '.quick-start dt', '#wGo']);
+  await assertGeistGlyphs(['#wTitle', '.quick-start dt', '#wGo']);
   await captureView('help');
   assert.deepEqual(await page(() => ({
-    title: document.title, header: document.querySelector('h1').textContent,
+    title: document.title, header: document.querySelector('h1 img').alt,
     meta: document.querySelector('meta[name="application-name"]').content,
     help: $('welcome').open && $('wTitle').textContent,
     algorithms: [...$('algo').options].map(option => option.value)
   })), {
     title: 'CHOKEPOINT · Road Network Analysis & Resilience', header: 'CHOKEPOINT',
-    meta: 'CHOKEPOINT', help: 'CHOKEPOINT', algorithms: ['bidir', 'astar', 'lpa']
+    meta: 'CHOKEPOINT', help: 'CHOKEPOINT', algorithms: ['bidir', 'astar', 'lpa', 'dijkstra']
   });
+  assert.deepEqual(await page(() => [...document.querySelectorAll('.panel-heading h2')].map(node => node.textContent)),
+    ['ROUTE PLANNER', 'ROAD CLOSURES', 'CRITICAL ROADS', 'COMPARE ALGORITHMS']);
+  assert.deepEqual(await page(() => [...$('mapStyle').options].map(option => option.textContent)),
+    ['Streets', 'Offline map', 'Satellite', 'Hybrid', 'Network view']);
+  assert.deepEqual(await page(() => [...$('routingRegion').querySelectorAll('optgroup')].map(group => group.label)),
+    ['Dedicated study areas', 'Luzon', 'Visayas', 'Mindanao', 'International study area', 'Existing geographic extracts and presentation']);
+  const regionOptions = await page(async () => {
+    const { routingRegions } = await import('/js/graph/region-manifest.js');
+    const available = [...$('routingRegion').options].map(option => option.value);
+    return { ids: available.slice().sort(), unique: new Set(available).size, expected: routingRegions.map(region => region.id).sort() };
+  });
+  assert.deepEqual(regionOptions.ids, regionOptions.expected);
+  assert.equal(regionOptions.unique, regionOptions.expected.length);
+  await page(() => { $('welcome').close(); $('regionPicker').focus(); });
+  await key('Enter');
+  await waitFor(() => page(() => $('regionDialog').open && document.activeElement === $('regionSearch')), 'network picker focus');
   await page(() => {
-    $('welcome').close();
-    document.querySelector('[data-mode=compare]').click();
+    $('regionSearch').value = 'iloilo province';
+    $('regionSearch').dispatchEvent(new Event('input'));
+  });
+  assert.deepEqual(await page(() => [...$('regionChoices').querySelectorAll('[role=option]')].map(row => row.textContent)),
+    ['Iloilo Province', 'Iloilo City and Province']);
+  await captureView('network-picker');
+  await page(() => {
+    $('regionSearch').value = 'no such network';
+    $('regionSearch').dispatchEvent(new Event('input'));
+  });
+  assert.equal(await page(() => !$('regionEmpty').hidden && !$('regionSearch').hasAttribute('aria-activedescendant')), true);
+  await key('Escape');
+  await waitFor(() => page(() => !$('regionDialog').open && document.activeElement === $('regionPicker')), 'network picker focus restored');
+  await page(() => $('regionPicker').click());
+  await key('ArrowDown');
+  await key('ArrowUp');
+  await key('Escape');
+  const artwork = await page(async () => {
+    const images = [...document.querySelectorAll('.mode-rail img, .endpoint-marker')];
+    await Promise.all(images.map(img => img.decode()));
+    return images.map(img => [new URL(img.src).pathname.split('/').at(-1), img.naturalWidth, img.naturalHeight]);
+  });
+  assert.deepEqual(artwork, [
+    ...['route', 'disrupt', 'analyze', 'compare'].map(name => [name + '.png', 168, 168]),
+    ['point-a.png', 114, 150], ['point-b.png', 114, 150]
+  ]);
+  assert.deepEqual(await page(async () => {
+    const artwork = [...document.querySelectorAll('.logo, .brand-wordmark')];
+    await Promise.all(artwork.map(img => img.decode()));
+    return [artwork[0].naturalWidth, ...artwork.map(img => new URL(img.currentSrc).pathname.split('/').at(-1))];
+  }), [1254, 'chokepoint-app-icon.png', 'chokepoint-wordmark-header.svg']);
+  assert.equal(await page(() => !!document.getElementById('panelToggle')), false);
+  await page(() => {
+    openWorkspace('compare');
     $('spd').value = 100;
   });
   await selectAlgorithm('astar');
@@ -251,16 +333,102 @@ try {
   const original = await verifyRoute();
   assert.equal(original.dist.toFixed(2), '5356.37');
   assert.equal(original.time.toFixed(3), '396.833');
+  const mapStyle = value => page(value => {
+    $('mapStyle').value = value;
+    $('mapStyle').dispatchEvent(new Event('change'));
+  }, value);
+  const graphPaint = label => waitFor(() => page(() => {
+    const canvas = document.querySelector('.network-graph[data-ready]');
+    return canvas ? { ...canvas.dataset } : false;
+  }), label);
+  const viewBeforeNetwork = await page(() => ({
+    camera: [map.getCenter().lat, map.getCenter().lng, map.getZoom()],
+    style: $('mapStyle').value, time: state.route.time, events: $('sN').textContent,
+    mode: document.querySelector('[data-mode][aria-current]').dataset.mode
+  }));
+  const requestsBeforeNetwork = external.length;
+  await mapStyle('network');
+  const networkCity = await graphPaint('network graph at route zoom');
+  assert.ok(+networkCity.roads > 25);
+  assert.equal(await page(() => map.getPane('tilePane').childElementCount + map.getPane('offlineTiles').childElementCount), 0);
+  assert.deepEqual(await page(() => ({
+    camera: [map.getCenter().lat, map.getCenter().lng, map.getZoom()],
+    time: state.route.time, events: $('sN').textContent,
+    mode: document.querySelector('[data-mode][aria-current]').dataset.mode
+  })), { camera: viewBeforeNetwork.camera, time: viewBeforeNetwork.time, events: viewBeforeNetwork.events, mode: viewBeforeNetwork.mode });
+  await page(() => {
+    const selectLayer = (layer, checked) => {
+      const input = document.querySelector(`[data-layer=${layer}]`);
+      input.checked = checked;
+      input.dispatchEvent(new Event('change'));
+    };
+    window.selectNetworkLayer = selectLayer;
+    map.setView([10.705, 122.558], 17, { animate: false });
+    $('networkLayers').open = true;
+    selectLayer('vertices', true);
+    selectLayer('directions', true);
+    selectLayer('search', false);
+  });
+  const networkDetail = await waitFor(async () => {
+    const paint = await graphPaint('network graph at street zoom');
+    return +paint.vertices && +paint.directions ? paint : false;
+  }, 'network vertices and direction arrows');
+  assert.equal(await page(() => getComputedStyle(document.querySelector('.search-traces')).visibility), 'hidden');
+  await page(() => selectNetworkLayer('search', true));
+  await captureView('network-view');
+  await page(() => {
+    map.setZoom(10, { animate: false });
+    delete document.querySelector('.network-graph').dataset.ready;
+  });
+  const networkOverview = await graphPaint('regional network overview');
+  assert.ok(+networkOverview.roads > 25);
+  assert.equal(networkOverview.vertices, '0');
+  assert.equal(networkOverview.directions, '0');
+  assert.equal(external.length, requestsBeforeNetwork);
+  console.log('NETWORK VIEW ' + JSON.stringify({ networkCity, networkDetail, networkOverview }));
+  await page(([lat, lng, zoom]) => { map.setView([lat, lng], zoom, { animate: false }); }, viewBeforeNetwork.camera);
+  await mapStyle(offline ? 'offline' : 'streets');
+  assert.equal(await page(() => $('networkLayers').hidden && !document.querySelector('.network-graph')), true);
+  if (offline) await offlineMapReady();
+  else if (process.env.UI_SCREENSHOTS) {
+    for (const [style, label] of [['streets', 'OpenStreetMap'], ['satellite', 'Stadia imagery'], ['hybrid', 'Stadia Alidade Satellite']]) {
+      await mapStyle(style);
+      await waitFor(() => page(label => $('mapSource').textContent.startsWith(label) &&
+        [...map.getPane('tilePane').querySelectorAll('img.leaflet-tile-loaded')].some(img => img.complete && img.naturalWidth), label), style + ' provider tiles', 15000);
+      await captureView('map-' + style);
+      console.log('LIVE BASEMAP ' + style + ' · ' + label);
+    }
+    await mapStyle('streets');
+  }
   await captureView('route', 'route');
+  if (process.env.UI_SCREENSHOTS) {
+    await page(() => {
+      openWorkspace('route');
+      document.querySelector('.network-coverage').open = true;
+      $('routingRegion').focus();
+    });
+    await captureView('regional-selector');
+    await page(() => {
+      document.querySelector('.network-coverage').open = false;
+      $('mapStyle').focus();
+    });
+    await captureView('map-style-selector');
+    await page(() => openWorkspace('compare'));
+  }
   const expansionCount = await page(() => $('sN').textContent);
-  assert.match(await compare(), /0 active closures.*Optimal cost checked against Dijkstra/);
-  await assertPlexGlyphs(['#sharedDistance', '#res tbody .num']);
+  assert.match(await compare(), /All optimized costs agree/);
+  assert.equal(await page(() => $('comparisonContext').textContent), 'Estimated fastest · 0 closures');
+  assert.deepEqual(await page(() => [...$('res').querySelectorAll('tbody th abbr')].map(node => node.textContent)),
+    ['Bidirectional Dijkstra', 'A*', 'LPA*', 'Standard Dijkstra']);
+  assert.deepEqual(await page(() => [$('sD').textContent, $('sT').textContent, $('sharedDistance').textContent, $('sharedTime').textContent]),
+    ['5.36 km', '6.61 min', '5.36 km', '6.61 min']);
+  await assertGeistGlyphs(['#sharedDistance', '#res tbody .num']);
   assert.deepEqual(await page(() => [...$('res').querySelectorAll('tbody tr')].map(row => row.children[1].textContent)),
     ['4,939', '5,548', '5,548', '8,730']);
   assert.ok(await allCostsAgree());
   await page(() => {
-    document.querySelector('[data-mode=route]').click();
-    document.querySelector('[data-mode=compare]').click();
+    openWorkspace('route');
+    openWorkspace('compare');
   });
   assert.equal(await status(), 'Route found');
   console.log('Original A* case reproduced successfully', { ...original, processed: expansionCount });
@@ -273,10 +441,17 @@ try {
     $('step').click();
   });
   assert.equal(await status(), 'Search paused');
+  await mapStyle('network');
+  await graphPaint('Network view with paused playback');
+  assert.equal(await status(), 'Search paused');
+  assert.equal(await page(() => $('sN').textContent), '1');
+  await mapStyle(offline ? 'offline' : 'streets');
+  if (offline) await offlineMapReady();
+  await captureView('paused');
   assert.equal(await page(() => $('sN').textContent), '1');
   await compare();
   await click('pause');
-  assert.match(await status(), /A\* is searching/);
+  assert.match(await status(), /Visualizing A\* search/);
   await click('skip');
   await result();
   await verifyRoute();
@@ -291,7 +466,7 @@ try {
   assert.deepEqual(await page(() => [state.names.s, state.names.e, state.mode]), [demo.start, demo.end, demo.mode]);
   assert.equal(await page(() => $('sN').textContent), '5,548');
   await page(({ center, zoom }) => {
-    document.querySelector('[data-mode=disrupt]').click();
+    openWorkspace('disrupt');
     map.setView(center, zoom, { animate: false });
     $('closeDraw').click();
     $('closeLine').click();
@@ -312,6 +487,7 @@ try {
   }
   await stroke(await page(line => closurePixels(line), demo.line));
   assert.equal(await reviewClosure(), 'Close 1 road segment?');
+  await captureView('closure-preview');
   const appliedAt = performance.now();
   await click('closeApply');
   await result('Route updated');
@@ -331,25 +507,42 @@ try {
   }), [demo.edge]);
   await captureView('disrupt');
   const repairWallMs = Math.round(performance.now() - appliedAt);
-  await page(() => document.querySelector('[data-mode=compare]').click());
-  assert.match(await compare(), /1 active closure.*Optimal cost checked against Dijkstra/);
+  await mapStyle('network');
+  await page(() => selectNetworkLayer('closures', false));
+  assert.equal(await page(() => getComputedStyle(map.getPane('closures')).visibility === 'hidden' && getClosures().length === 1), true);
+  await page(() => selectNetworkLayer('closures', true));
+  assert.equal(await page(() => getComputedStyle(map.getPane('closures')).visibility), 'visible');
+  await mapStyle(offline ? 'offline' : 'streets');
+  if (offline) await offlineMapReady();
+  await page(() => openWorkspace('compare'));
+  assert.match(await compare(), /All optimized costs agree/);
+  assert.equal(await page(() => $('comparisonContext').textContent), 'Estimated fastest · 1 closure');
   const freshLpa = await page(() => [...document.querySelectorAll('#res tbody tr')]
     .find(row => row.firstElementChild.textContent.includes('LPA*')).children[1].textContent);
   assert.equal(freshLpa, '11,524');
   assert.match(await page(() => $('repairComparison').textContent), /11,524 events.*46.4% fewer events.*Both costs match Dijkstra/);
   await captureView('compare');
-  await page(() => document.querySelector('[data-mode=disrupt]').click());
+  await page(() => { $('repairComparison').scrollIntoView({ block: 'nearest' }); });
+  await captureView('compare-repair');
+  await page(() => openWorkspace('disrupt'));
   await click('closeUndo');
   await result('Route updated');
   assert.ok(Math.abs((await verifyRoute()).time - original.time) < 1e-6);
-  await page(() => document.querySelector('[data-mode=analyze]').click());
+  await page(() => openWorkspace('analyze'));
   const analyzeStarted = performance.now();
   await click('chokeBtn');
   await waitFor(() => page(() => !$('chokeBtn').disabled && $('chokeList').children.length), 'presentation critical-road analysis');
   const analysisWallMs = Math.round(performance.now() - analyzeStarted);
-  assert.match(await page(() => $('chokeList').firstElementChild.textContent), /General Luna Avenue[\s\S]*15\/36 sampled trips/);
+  assert.match(await page(() => $('chokeList').firstElementChild.textContent), /General Luna Avenue[\s\S]*Affected trips · 15\/36/);
   assert.equal(await page(() => $('sampledTrips').textContent), '36');
   await captureView('analyze');
+  await mapStyle('network');
+  await page(() => selectNetworkLayer('critical', false));
+  assert.equal(await page(() => getComputedStyle(map.getPane('criticalRoads')).visibility === 'hidden' && $('chokeList').children.length > 0), true);
+  await page(() => selectNetworkLayer('critical', true));
+  assert.equal(await page(() => getComputedStyle(map.getPane('criticalRoads')).visibility), 'visible');
+  await mapStyle(offline ? 'offline' : 'streets');
+  if (offline) await offlineMapReady();
   console.log('Presentation rehearsal', { wallMs: Math.round(performance.now() - demoStarted), repairWallMs, analysisWallMs, freshLpa, repair, detour });
 
   await page(() => {
@@ -360,7 +553,8 @@ try {
   await click('go');
   await result();
   console.log('Long shortest route', await verifyRoute());
-  assert.match(await compare(), /Shortest distance.*Optimal cost checked against Dijkstra/);
+  assert.match(await compare(), /All optimized costs agree/);
+  assert.equal(await page(() => $('comparisonContext').textContent), 'Shortest distance · 0 closures');
   const backgrounds = [];
   for (const style of offline ? ['streets', 'offline'] : ['satellite', 'hybrid', 'streets', 'offline', 'streets']) {
     await page(style => {
@@ -392,7 +586,7 @@ try {
     const dx = graph.lng[v] - graph.lng[u], dy = graph.lat[v] - graph.lat[u];
     const scale = .00013 / Math.hypot(dx, dy);
     window.closureFixture = [[lat + dx * scale, lng - dy * scale], [lat - dx * scale, lng + dy * scale]];
-    document.querySelector('[data-mode=disrupt]').click();
+    openWorkspace('disrupt');
     map.setView([lat, lng], 18, { animate: false });
     $('closeDraw').click();
   });
@@ -416,7 +610,8 @@ try {
   assert.equal(await page(() => getClosures().length), 1);
   assert.notEqual((await verifyRoute()).time, open.time);
   assert.match(await page(() => $('repairResult').textContent), /Reused search state/);
-  assert.match(await compare(), /1 active closure.*Optimal cost checked against Dijkstra/);
+  assert.match(await compare(), /All optimized costs agree/);
+  assert.equal(await page(() => $('comparisonContext').textContent), 'Estimated fastest · 1 closure');
   for (const [style, zoom] of offline ? [['offline', 18], ['offline', 14]] : [['satellite', 18], ['hybrid', 14], ['streets', 18]]) {
     await page((style, zoom) => {
       map.setView(closureFixture[0], zoom, { animate: false });
@@ -486,7 +681,9 @@ try {
   }), true);
   assert.equal(await page(() => state.route.path), null);
   assert.equal(await page(() => $('msg').textContent), 'No route is available under the current road closures.');
-  assert.match(await compare(), /2 active closures.*No route is available under the current road closures/);
+  await captureView('unreachable');
+  assert.match(await compare(), /No route is available under the current road closures/);
+  assert.equal(await page(() => $('comparisonContext').textContent), 'Estimated fastest · 2 closures');
   await page(() => $('closureList').querySelector('li:last-child button').click());
   await result('Route updated');
   await verifyRoute();
@@ -500,7 +697,7 @@ try {
 
   for (const cancel of ['review', 'escape', 'panel', 'outside']) {
     await page(() => {
-      document.querySelector('[data-mode=disrupt]').click();
+      openWorkspace('disrupt');
       map.setView(closureFixture[0], 18, { animate: false });
       $('closeDraw').click();
       $('closeLine').click();
@@ -515,7 +712,7 @@ try {
       await mouse('mousePressed', points[0], 1);
       await mouse('mouseMoved', points[1], 1);
       if (cancel === 'escape') await key('Escape');
-      if (cancel === 'panel') await page(() => document.querySelector('[data-mode=route]').click());
+      if (cancel === 'panel') await page(() => openWorkspace('route'));
       await mouse('mouseReleased', cancel === 'outside' ? [3, 3] : points[1]);
     }
     assert.equal(await page(() => {
@@ -549,14 +746,14 @@ try {
   await click('swap');
   await click('go');
   await result('No route available');
-  assert.match(await page(() => $('msg').textContent), /not connected/);
+  assert.match(await page(() => $('msg').textContent), /No route was found|No valid route exists in this direction/);
   await page(() => {
     setPoint('s', PLACES[DEFAULT_START], DEFAULT_START);
     setPoint('e', [10.665884, 122.590546], 'Jordan Public Market');
   });
   await click('go');
   await result('No route available');
-  assert.match(await compare(), /not connected/);
+  assert.match(await compare(), /No route was found|No valid route exists in this direction/);
   await page(() => setPoint('e', [14.654027, 121.049856], 'Quezon Memorial Circle'));
   await click('go');
   await result('No route available');
@@ -569,7 +766,12 @@ try {
 
   await page(() => {
     setPoint('e', PLACES[DEFAULT_END], DEFAULT_END);
-    document.querySelector('[data-mode=compare]').click();
+    openWorkspace('compare');
+  });
+  // Resolve the shared Panay/Iloilo extent before testing cancellation of work already running.
+  await click('go');
+  await result();
+  await page(() => {
     $('spd').value = 0;
     $('visualize').click();
     $('compareBtn').click();
@@ -673,7 +875,7 @@ try {
     [...$(field + 'List').querySelectorAll('strong')].some(item => item.textContent === name), name, field), name + ' result');
   const singaporeModeled = await page(() => [...$('routingRegion').options].some(option => option.value === 'singapore-central-pilot'));
   if (offline) {
-    await page(() => document.querySelector('[data-mode=route]').click());
+    await page(() => openWorkspace('route'));
     await type('Manila');
     await option('Manila');
     await waitFor(() => page(() => $('toSearchStatus').textContent === 'Showing offline results.'), 'national locality index');
@@ -723,7 +925,7 @@ try {
       if (query === 'Tokyo') return new Promise(resolve => realTimer(() => resolve(Response.json({ features: results[query] })), 1700));
       return Promise.resolve(Response.json({ features: results[query] || [] }));
     };
-    document.querySelector('[data-mode=route]').click();
+    openWorkspace('route');
   });
   for (const [query, name, ll] of [
     ['Manila', 'Manila', [14.5904492, 120.9803621]],
@@ -740,7 +942,7 @@ try {
     const view = await page(ll => {
       let pin;
       map.eachLayer(layer => {
-        if (layer.getElement?.()?.classList.contains('endpoint-marker') && layer.getElement().querySelector('.end')) pin = layer.getLatLng();
+        if (layer.options.icon?.options.iconUrl?.endsWith('/point-b.png')) pin = layer.getLatLng();
       });
       return { pixelOffset: map.latLngToContainerPoint(ll).distanceTo(map.getSize().divideBy(2)), pin: [pin.lat, pin.lng], zoom: map.getZoom() };
     }, query === 'Manila' ? await page(() => state.end) : ll);
@@ -748,7 +950,7 @@ try {
     assert.equal(view.zoom, 11);
     assert.ok(view.pin.every((coordinate, index) => Math.abs(coordinate - ll[index]) < (query === 'Manila' ? .03 : 1e-8)));
     const modeled = await page(async ll => (await import('/js/features/routing-region.js')).regionsForPoint(ll).length > 0, ll);
-    assert.match(await page(() => $('toAccess').textContent), modeled ? /Routing can check this point/ : /outside CHOKEPOINT's current routing coverage/);
+    assert.match(await page(() => $('toAccess').textContent), modeled ? /Switch to/ : /outside CHOKEPOINT's current routing coverage/);
     await click('go');
     assert.equal(await status(), modeled ? 'No route available' : 'Endpoint unavailable');
     assert.equal(await page(() => !state.route && !routeLayer()), true);
@@ -761,10 +963,14 @@ try {
   });
   assert.ok(await page(() => map.getCenter().lng < -150), 'panning across the world seam wraps the viewport');
   await cdp('Network.enable');
-  await cdp('Network.setBlockedURLs', { urls: ['*tile.openstreetmap.org/*'] });
+  await cdp('Network.setCacheDisabled', { cacheDisabled: true });
+  await cdp('Fetch.enable', { patterns: [{ urlPattern: '*://tile.openstreetmap.org/*', requestStage: 'Request' }] });
+  denyExternal = true;
   await page(() => { map.setView([48.8566, 2.3522], 12, { animate: false }); });
   await waitFor(() => page(() => $('mapSource').textContent === 'Map tiles unavailable here'), 'honest overseas tile fallback');
-  await cdp('Network.setBlockedURLs', { urls: [] });
+  denyExternal = false;
+  await cdp('Fetch.disable');
+  await cdp('Network.setCacheDisabled', { cacheDisabled: false });
   await click('studyArea');
   await waitFor(() => page(() => $('mapSource').textContent.includes('OpenStreetMap')), 'tiles recovered after returning to Iloilo');
   await page(() => {
@@ -775,7 +981,7 @@ try {
   const picked = await page(() => ({ point: state.end, name: state.names.e }));
   assert.equal(picked.name, 'Pinned point');
   assert.ok(picked.point.every((coordinate, index) => Math.abs(coordinate - [1.29, 103.85][index]) < 1e-8));
-  assert.match(await page(() => $('toAccess').textContent), singaporeModeled ? /Routing can check this point in Central Singapore/ : /outside CHOKEPOINT's current routing coverage/);
+  assert.match(await page(() => $('toAccess').textContent), singaporeModeled ? /Switch to Central Singapore/ : /outside CHOKEPOINT's current routing coverage/);
   await type('Tokyo');
   await waitFor(() => page(() => discoveryRequests.includes('Tokyo')), 'in-flight Tokyo request');
   await type('Lon');
@@ -805,14 +1011,14 @@ try {
   console.log(offline ? 'Cold offline Panay and Philippine basemaps, worldwide overview, and local place search passed'
     : 'Worldwide discovery, tile and pin alignment, duplicate names, stale results, timeout and offline Iloilo fallback passed');
 
-  await page(() => document.querySelector('[data-mode=analyze]').click());
+  await page(() => openWorkspace('analyze'));
   await click('chokeBtn');
   await waitFor(() => page(() => !$('chokeBtn').disabled && $('chokeList').children.length), 'critical-road analysis');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
   const touch = async (type, point) => cdp('Input.dispatchTouchEvent', { type, touchPoints: point ? [{ x: point[0], y: point[1] }] : [] });
   await page(() => {
-    document.querySelector('[data-mode=route]').click();
+    openWorkspace('route');
     const input = $('to');
     input.focus();
     input.value = 'Jaro Cathedral';
@@ -836,7 +1042,7 @@ try {
   await result();
   await verifyRoute();
   await page(() => {
-    document.querySelector('[data-mode=disrupt]').click();
+    openWorkspace('disrupt');
     map.setView(areaFixture[0], 18, { animate: false });
     $('closeDraw').click();
     $('closeArea').click();
@@ -857,7 +1063,9 @@ try {
   assert.equal(await page(() => $('closureCursor').hidden && $('closeReview').hidden && getClosures().length === 0 && map.dragging.enabled()), true);
 
   const fixtures = {
+    ...JSON.parse(await readFile(new URL('../scripts/administrative-fixtures.json', import.meta.url))),
     ...JSON.parse(await readFile(new URL('../scripts/philippine-region-fixtures.json', import.meta.url))),
+    ...JSON.parse(await readFile(new URL('../scripts/iloilo-region-fixture.json', import.meta.url))),
     ...JSON.parse(await readFile(new URL('../scripts/regional-benchmark-fixtures.json', import.meta.url)))
   };
   const chooseRegion = id => page(id => {
@@ -865,7 +1073,7 @@ try {
     $('routingRegion').dispatchEvent(new Event('change'));
   }, id);
   const regionReady = id => waitFor(() => page(id => $('routingRegion').value === id && $('regionProgress').hidden, id), id + ' graph');
-  const workspace = name => page(name => document.querySelector(`[data-mode=${name}]`).click(), name);
+  const workspace = name => page(name => openWorkspace(name), name);
   const endpoints = (start, end) => page((start, end) => {
     setPoint('s', start, 'Sample origin');
     setPoint('e', end, 'Sample destination');
@@ -896,7 +1104,12 @@ try {
   assert.deepEqual(await page(() => regionRequests), []);
   assert.equal(await page(() => getClosures().length), 1);
   await click('go');
+  await waitFor(() => page(() => !$('tripRegionOffer').hidden), 'explicit alternative network offer');
+  assert.equal(await page(() => $('routingRegion').value), 'panay-guimaras');
+  assert.deepEqual(await page(() => regionRequests), []);
+  await chooseRegion('bohol-siquijor');
   await regionReady('bohol-siquijor');
+  await click('go');
   await result();
   const boholRoute = await verifyRoute();
   assert.equal(await page(() => getClosures().length === 0 && closureLayers().length === 0 && $('repairBox').hidden), true);
@@ -932,7 +1145,7 @@ try {
   await endpoints(bohol.start, bohol.disconnected);
   await click('go');
   await result('No route available');
-  assert.match(await page(() => $('msg').textContent), /not connected/);
+  assert.match(await page(() => $('msg').textContent), /No route was found|No valid route exists in this direction/);
   await endpoints(PLACES[demo.start], bohol.long);
   await click('go');
   await result('No route available');
@@ -959,8 +1172,9 @@ try {
   const leyte = fixtures['leyte-samar'];
   await endpoints(leyte.start, leyte.long);
   await selectAlgorithm('astar');
-  await click('go');
+  await chooseRegion('leyte-samar');
   await regionReady('leyte-samar');
+  await click('go');
   await result();
   const leyteRoute = await verifyRoute();
   assert.equal(await page(() => !$('res').querySelector('tbody') && $('chokeList').children.length === 0), true);
@@ -975,25 +1189,106 @@ try {
     const singapore = fixtures['singapore-central-pilot'];
     await workspace('route');
     await endpoints(singapore.start, singapore.short);
-    await click('go');
+    await chooseRegion('singapore-central-pilot');
     await regionReady('singapore-central-pilot');
+    await click('go');
     await result();
     const pilotRoute = await verifyRoute();
     await workspace('compare');
     await compare();
     assert.ok(await allCostsAgree());
-    console.log('Central Singapore automatic loading and comparison passed', { distanceMetres: pilotRoute.dist, modeledSeconds: pilotRoute.time });
+    console.log('Central Singapore explicit loading and comparison passed', { distanceMetres: pilotRoute.dist, modeledSeconds: pilotRoute.time });
   }
   console.log('Regional browser workflows passed', { boholKm: boholRoute.dist / 1000, leyteSamarKm: leyteRoute.dist / 1000, boholRepairMs });
 
+  const iloilo = fixtures['iloilo-city-province'];
+  await workspace('route');
+  await endpoints(iloilo.start, iloilo.long);
+  await page(() => $('regionPicker').focus());
+  await key('Enter');
+  await waitFor(() => page(() => $('regionDialog').open && document.activeElement === $('regionSearch')), 'opening the picker from the keyboard');
+  await page(() => {
+    $('regionSearch').value = 'iloilo city province';
+    $('regionSearch').dispatchEvent(new Event('input'));
+  });
+  await key('Enter');
+  await regionReady('iloilo-city-province');
+  assert.equal(await page(() => !$('regionDialog').open && $('regionPicker').textContent === 'Iloilo City and Province'), true);
+  await click('go');
+  await result();
+  const iloiloRoute = await verifyRoute();
+  assert.equal(Math.round(iloiloRoute.dist), 21901);
+  await workspace('compare');
+  await compare();
+  assert.ok(await allCostsAgree());
+  console.log('Keyboard-selected Iloilo City and Province verified', { distanceMetres: iloiloRoute.dist, modeledSeconds: iloiloRoute.time });
+
+  for (const id of ['iloilo-province', 'panay-island']) {
+    const study = fixtures[id];
+    await workspace('route');
+    await endpoints(study.start, study.long);
+    await chooseRegion(id);
+    await regionReady(id);
+    assert.equal(await page(async id => {
+      const graph = await loadGraph(), [w, s, e, n] = graph.region.bounds;
+      return graph.region.id === id && map.getBounds().contains([s, w]) && map.getBounds().contains([n, e]);
+    }, id), true);
+    await click('go');
+    await result();
+    const trip = await verifyRoute();
+    await workspace('compare');
+    await compare();
+    assert.ok(await allCostsAgree());
+    console.log(study.name + ' browser route', { metres: trip.dist, seconds: trip.time });
+  }
+
+  await workspace('route');
+  await chooseRegion('iloilo-city');
+  await regionReady('iloilo-city');
+  await type('West Visayas State University', 'from');
+  await option('West Visayas State University', 'from');
+  await click('fromOpt0');
+  await page(() => setPoint('e', PLACES['Plaza Libertad'], 'Plaza Libertad'));
+  assert.match(await page(() => $('fromAccess').textContent), /Luna Street public-road access · 133 m/);
+  await click('go');
+  await result();
+  const campusTrip = await verifyRoute();
+  assert.ok(Math.abs(campusTrip.time - 223.8409912002169) < 1e-6);
+  await captureView('iloilo-campus');
+  await workspace('compare');
+  await compare();
+  assert.ok(await allCostsAgree());
+  await workspace('route');
+  const eastern = fixtures['ph-800000000'];
+  await endpoints(eastern.start, eastern.long);
+  await chooseRegion('ph-800000000');
+  await regionReady('ph-800000000');
+  assert.equal(await page(() => $('studyArea').getAttribute('aria-label')), 'Return to Region VIII — Eastern Visayas');
+  const regionInView = () => page(async () => {
+    const { bounds: [w, s, e, n] } = (await loadGraph()).region;
+    return map.getBounds().contains([s, w]) && map.getBounds().contains([n, e]);
+  });
+  assert.equal(await regionInView(), true);
+  await page(() => { map.setView([10.7, 122.56], 15, { animate: false }); });
+  await click('studyArea');
+  assert.equal(await regionInView(), true);
+  await click('go');
+  await result();
+  const acrossBridge = await verifyRoute();
+  assert.ok(Math.abs(acrossBridge.dist - 104779.62731170177) < 1e-6);
+  console.log('City campus and confirmed Eastern Visayas bridge regression', { campusTrip, acrossBridge });
+
   if (process.env.REGION_PROFILE) {
+    await workspace('route');
+    await chooseRegion('panay-guimaras');
+    await regionReady('panay-guimaras');
     const mobile = process.env.REGION_PROFILE_MOBILE === '1';
     await cdp('Emulation.setDeviceMetricsOverride', { width: mobile ? 390 : 1440, height: mobile ? 844 : 900,
       deviceScaleFactor: mobile ? 2 : 1, mobile });
     await cdp('Emulation.setCPUThrottlingRate', { rate: mobile ? 4 : 1 });
     if (!offline) await cdp('Network.emulateNetworkConditions', { offline: false, latency: 70, downloadThroughput: 1250000, uploadThroughput: 750000 });
     const ids = process.env.REGION_PROFILE === 'all'
-      ? await page(() => [...$('routingRegion').options].slice(1).map(option => option.value))
+      ? await page(() => [...$('routingRegion').options].filter(option => option.value !== 'panay-guimaras').map(option => option.value))
       : process.env.REGION_PROFILE.split(',');
     for (const id of ids) {
       const fixture = fixtures[id];
@@ -1004,7 +1299,11 @@ try {
       await chooseRegion(id);
       await regionReady(id);
       const switchMs = Math.round(performance.now() - start);
-      if (offline) await offlineMapReady();
+      assert.equal(await regionInView(), true, id + ' fitted graph coverage');
+      if (offline) {
+        await page(ll => { map.setView(ll, 13, { animate: false }); }, fixture.start);
+        await offlineMapReady();
+      }
       await cdp('HeapProfiler.collectGarbage');
       const { usedSize, backingStorageSize } = await cdp('Runtime.getHeapUsage');
       const load = await page(async () => (await loadGraph()).loadTimings);
@@ -1013,6 +1312,12 @@ try {
       await result();
       const routeMs = Math.round(performance.now() - start);
       const route = await verifyRoute();
+      if (id.startsWith('ph-') || ['iloilo-city', 'iloilo-province', 'panay-island', 'singapore-central-pilot'].includes(id)) {
+        await page(() => { $('from').blur(); $('from').focus(); });
+        await waitFor(() => page(() => !$('fromList').hidden && $('fromList').children.length > 0), id + ' active-region landmarks');
+        if (id !== 'iloilo-city') assert.match(await page(() => $('fromList').textContent), /Local index/);
+        await page(() => $('from').blur());
+      }
       await workspace('analyze');
       start = performance.now();
       await click('chokeBtn');
@@ -1024,30 +1329,92 @@ try {
     }
   }
   if (offline) {
-    for (const [width, height] of [[1440, 900], [1024, 576], [768, 720], [390, 844], [320, 568]]) {
+    await workspace('route');
+    await chooseRegion('panay-guimaras');
+    await regionReady('panay-guimaras');
+    await endpoints(PLACES[demo.start], PLACES[demo.end]);
+    await click('go');
+    await result();
+    await workspace('compare');
+    await compare();
+    for (const [width, height] of [[1440, 900], [1024, 576], [1024, 480], [768, 720], [390, 844], [320, 568]]) {
       await cdp('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 700 });
+      await cdp('Emulation.setTouchEmulationEnabled', { enabled: width < 700, maxTouchPoints: 1 });
+      const layouts = [];
       for (const mode of ['route', 'disrupt', 'analyze', 'compare']) {
         await workspace(mode);
+        await page(() => { document.querySelector('.mode-panel:not([hidden]) .panel-body').scrollTop = 0; });
+        await waitFor(() => page(() => !$('workspace').getAnimations().length &&
+          map.getSize().x === $('map').clientWidth && map.getSize().y === $('map').clientHeight),
+          'Leaflet viewport matches the settled layout');
+        layouts.push(await page(() => {
+          const rect = selector => {
+            const box = document.querySelector(selector).getBoundingClientRect();
+            return [box.x, box.y, box.width, box.height];
+          };
+          return {
+            header: rect('.app-header'), rail: rect('.mode-rail'), panel: rect('#panel'),
+            heading: rect('.mode-panel:not([hidden]) .panel-heading'),
+            headingText: rect('.mode-panel:not([hidden]) h2').filter((_, index) => index !== 2),
+            map: rect('#map'), camera: [map.getCenter().lat, map.getCenter().lng, map.getZoom()],
+            controls: $('routePanel').hidden ? undefined
+              : Object.fromEntries(['from', 'to', 'regionPicker', 'go', 'pickStart', 'swap', 'mapStyle', 'studyArea', 'wheelMode']
+                .map(id => [id, rect('#' + id)]))
+          };
+        }));
         assert.ok(await page(() => {
           const panel = document.querySelector('.mode-panel:not([hidden])');
           const body = panel.querySelector('.panel-body');
           body.scrollTop = body.scrollHeight;
           const heading = panel.querySelector('h2').getBoundingClientRect();
-          const actions = panel.querySelector('.panel-actions').getBoundingClientRect();
+          const action = panel.querySelector('.primary');
+          action.scrollIntoView({ block: 'nearest' });
           return document.documentElement.scrollWidth <= innerWidth + 1 &&
-            heading.top >= 0 && actions.bottom <= innerHeight + 1 &&
+            heading.top >= 0 && action.getBoundingClientRect().bottom <= innerHeight + 1 &&
             map.getSize().x > 0 && map.getSize().y > 0;
         }), `${mode} remains usable at ${width} × ${height}`);
+        if (width === 390) {
+          await page(() => { document.querySelector('.mode-panel:not([hidden]) .panel-body').scrollTop = 0; });
+          await captureView('mobile-' + mode);
+        }
       }
+      for (const layout of layouts.slice(1)) {
+        for (const part of ['header', 'rail', 'panel', 'heading', 'headingText', 'map', 'camera']) {
+          assert.deepEqual(layout[part], layouts[0][part], `${part} stays stable when switching workspaces at ${width} × ${height}`);
+        }
+      }
+      if (width >= 1024) {
+        assert.equal(layouts[0].header[3], 100);
+        assert.equal(layouts[0].rail[2], 94);
+        assert.equal(layouts[0].panel[2], 368);
+        assert.equal(layouts[0].heading[3], 56);
+        for (const id of ['from', 'to', 'regionPicker', 'pickStart', 'swap', 'mapStyle', 'studyArea', 'wheelMode']) {
+          assert.equal(layouts[0].controls[id][3], 44, id + ' uses the shared control height');
+        }
+        assert.equal(layouts[0].controls.go[3], 46);
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: width - 4, y: 4 });
+        await waitFor(() => page(height => {
+          const rail = document.querySelector('.mode-rail').getBoundingClientRect();
+          const buttons = [...document.querySelectorAll('.mode-rail button')].map(button => button.getBoundingClientRect());
+          const gap = buttons[1].top - buttons[0].bottom;
+          return Math.abs((buttons[0].top + buttons.at(-1).bottom) - (rail.top + rail.bottom)) <= 1 &&
+            (height > 550 ? gap >= 24 && gap <= 36 : gap === 12);
+        }, height), 'centered rail with enough space between modes');
+      }
+      console.log('WORKSPACE DIMENSIONS ' + JSON.stringify({ width, height, ...layouts[0] }));
       await page(() => $('help').focus());
       await key('Enter');
       await waitFor(() => page(() => $('welcome').open && $('welcome').contains(document.activeElement)), 'keyboard opens and focuses Help');
       await key('Escape');
       await waitFor(() => page(() => !$('welcome').open && document.activeElement === $('help')), 'Escape restores Help focus');
       const oldArea = await page(() => map.getSize().x * map.getSize().y);
-      await click('panelToggle');
+      await page(() => { document.querySelector('[data-mode][aria-current]').click(); });
       await waitFor(() => page(area => map.getSize().x * map.getSize().y > area, oldArea), 'expanded presentation map');
-      await click('panelToggle');
+      assert.equal(await page(() => document.querySelector('[data-mode][aria-current]').getAttribute('aria-expanded')), 'false');
+      await page(() => { document.querySelector('[data-mode][aria-current]').click(); });
+      assert.equal(await page(() => document.querySelector('[data-mode][aria-current]').getAttribute('aria-expanded')), 'true');
+      await waitFor(() => page(area => !$('workspace').getAnimations().length &&
+        map.getSize().x * map.getSize().y === area, oldArea), 'restored workspace map size');
     }
     await page(async () => {
       const { renderResults } = await import('/js/ui/results-table.js');
@@ -1062,6 +1429,11 @@ try {
       rows[1].path = null; rows[1].matches = false; rows[1].verdict = 'Unreachable · differs';
       renderResults(rows);
       if (!$('res').textContent.includes(rows[1].verdict)) throw Error('Reachability disagreement must remain visible');
+      for (const row of rows) { row.path = [0, 1]; row.dist = 5000; row.matches = !row.baseline; row.count = 10; }
+      renderResults(rows);
+      for (const result of $('comparisonEffort').querySelectorAll('strong')) {
+        if (result.textContent !== 'Bidirectional Dijkstra, A*, LPA*, Standard Dijkstra') throw Error('All tied observations must remain visible');
+      }
     });
     console.log('Responsive geometry, keyboard Help, presentation view, and independent route totals passed');
     assert.ok(loggedErrors.some(line => line.includes('checksum mismatch')));
@@ -1073,8 +1445,33 @@ try {
       document.querySelector('.leaflet-localRoads-pane canvas')), 'missing archives, emergency local roads');
     await click('go');
     await waitFor(() => page(() => document.getElementById('lt')?.textContent === 'Route found'), 'routing with emergency map');
-    assert.deepEqual(intercepted, []);
+    assert.deepEqual(interceptionErrors(), []);
     console.log('Offline fallback passed with missing map archives and corrupted regional data', { deniedExternalRequests: external.length });
+    missingMaps = false;
+    for (const fault of ['missing', 'stale']) {
+      startupFault = fault;
+      await cdp('Page.navigate', { url: appUrl.href });
+      await waitFor(() => page(() => document.getElementById('lt')?.textContent === 'Application startup failed'),
+        fault + ' module reports a startup failure');
+      assert.equal(await page(() => {
+        const retry = document.getElementById('graphRetry');
+        return !retry.hidden && retry.textContent === 'Reload application' && document.getElementById('go').disabled;
+      }), true);
+      assert.ok(loggedErrors.some(line => line.includes('Application startup failed')));
+      startupFault = undefined;
+      await click('graphRetry');
+      await waitFor(() => page(() => document.getElementById('lt')?.textContent === 'Ready to route'), 'reload recovers startup');
+      await click('go');
+      await waitFor(() => page(() => document.getElementById('lt')?.textContent === 'Route found'), 'routing after startup recovery');
+    }
+    assert.deepEqual(interceptionErrors(), []);
+    console.log('Missing and stale modules show an actionable startup error and recover through Reload Application');
+    await cdp('Fetch.disable');
+    await cdp('Page.navigate', { url: new URL('../index.html', import.meta.url).href });
+    await waitFor(() => page(() => location.protocol === 'file:' &&
+      document.getElementById('lt')?.textContent === 'Start the local server' &&
+      document.getElementById('msg')?.textContent.includes('python3 scripts/serve.py')), 'direct-file startup instructions');
+    console.log('Opening index.html directly gives local server instructions');
   } else {
     await cdp('Network.enable');
     await cdp('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
@@ -1110,7 +1507,7 @@ try {
     await waitFor(() => page(() => $('mapSource').textContent.includes('OpenStreetMap') &&
       !$('map').classList.contains('needs-road-fallback')), 'online map restored');
     assert.deepEqual(await page(() => mapState()), before);
-    assert.deepEqual(intercepted, []);
+    assert.deepEqual(interceptionErrors(), []);
     console.log('Connectivity loss and recovery preserved camera, endpoints, route and closure overlay');
   }
   assert.deepEqual(uncaught, []);

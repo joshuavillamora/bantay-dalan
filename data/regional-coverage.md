@@ -1,6 +1,10 @@
 # CHOKEPOINT regional routing coverage
 
-The app starts with Panay and Guimaras and offers **21 additional Philippine road networks** on demand. The 22 Philippine graphs represent selected roads across all 18 administrative regions. Coverage varies within each region and stops at the published dataset boundaries. Central Singapore is a separately labeled international pilot. Place search remains worldwide where Photon has indexed results. [Philippine Statistics Authority regional checklist](https://psa.gov.ph/classification/psgc/regions)
+The November 24 regional rollout started with Panay and Guimaras and supplied **22 additional Philippine road networks** on demand. The 23 Philippine graphs represent selected roads across all 18 administrative regions. Coverage varies within each region and stops at the published dataset boundaries. Central Singapore is a separately labeled international pilot. Place search remains worldwide where Photon has indexed results. [Philippine Statistics Authority regional checklist](https://psa.gov.ph/classification/psgc/regions)
+
+The later [Iloilo City and Province extract](final-redesign.md#road-networks) adds a verified dedicated study graph inside the same source coverage. It uses a municipal filter and a separate verification fixture. The tables below retain the original regional benchmark results.
+
+See the [November 25 engineering audit](master-audit.md#regional-validation) for the new default and the verified administrative graphs.
 
 ## Philippine coverage by administrative region
 

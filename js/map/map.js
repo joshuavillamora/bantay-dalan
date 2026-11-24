@@ -3,6 +3,7 @@ import { MAP_CENTER, MAP_ZOOM, PLACES, DEFAULT_START, DEFAULT_END } from '../con
 import { $ } from '../utils/dom.js';
 import { on } from '../events.js';
 import { initBasemaps } from './basemaps.js';
+import { initNetworkView } from './network-view.js';
 import { roadSpatialIndex, visitRoadSegments } from '../graph/road-spatial.js';
 
 export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -22,12 +23,15 @@ L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
 map.createPane('localRoads').style.zIndex = '190';
 map.createPane('previousRoute').style.zIndex = '395';
 map.createPane('closures').style.zIndex = '420';
+map.createPane('criticalRoads').style.zIndex = '425';
 map.createPane('closurePreview').style.zIndex = '430';
 const markLocalRoadsReady = initBasemaps(map);
+const updateNetworkGraph = initNetworkView(map);
 let removeLocalRoads;
 
 /* The local network sits beneath the tiles so it also covers failed or offline tile requests. */
 export function showLocalRoads(g, iloiloLabels) {
+  updateNetworkGraph(g);
   removeLocalRoads?.();
   const options = { renderer: L.canvas({ pane: 'localRoads' }), interactive: false };
   const minor = L.polyline([], { ...options, color: '#a3b2b2', weight: 1, opacity: .75 }).addTo(map);
@@ -94,16 +98,50 @@ export const fitPad = (maxZoom = 16) => {
   };
 };
 
-let framing, fitting = false;
-map.on('movestart zoomstart', () => { if (!fitting) framing = null; });
 export function fitTrip(points, maxZoom) {
   if (!points.length || !map.getSize().y) return;
-  framing = { points, maxZoom };
-  fitting = true;
-  try { map.fitBounds(points, fitPad(maxZoom)); }
-  finally { fitting = false; }
+  map.fitBounds(points, fitPad(maxZoom));
 }
-export const showStudyArea = () => fitTrip([PLACES[DEFAULT_START], PLACES[DEFAULT_END]], 15);
+
+const coveragePane = map.createPane('roadCoverage');
+coveragePane.style.zIndex = '325';
+const coverageStyle = { pane: 'roadCoverage', interactive: false, color: '#354d65', weight: 1.75,
+  opacity: .67, dashArray: '6 6', fill: false, className: 'analysis-outline' };
+let roadRegion, regionBounds, coverageLayer, coverageRequest;
+export function showStudyArea() {
+  if (regionBounds) fitTrip([regionBounds.getSouthWest(), regionBounds.getNorthEast()], 15);
+  else fitTrip([PLACES[DEFAULT_START], PLACES[DEFAULT_END]], 15);
+}
+
+export function setMapRegion(region, frame = true) {
+  roadRegion = region;
+  coverageRequest?.abort();
+  coverageLayer?.remove();
+  const [west, south, east, north] = region.bounds;
+  regionBounds = L.latLngBounds([south, west], [north, east]);
+  coverageLayer = L.rectangle(regionBounds, coverageStyle).addTo(map);
+  setLegend('coverage', true);
+  const label = `Return to ${region.name}`;
+  $('studyArea').title = label;
+  $('studyArea').setAttribute('aria-label', label);
+  if (frame) showStudyArea();
+  if (region.coverageUrl) loadCoverage(region);
+}
+
+async function loadCoverage(region) {
+  const { signal } = coverageRequest = new AbortController();
+  try {
+    const response = await fetch(region.coverageUrl, { signal });
+    if (!response.ok) throw Error('Boundary file unavailable');
+    const boundary = await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
+    if (signal.aborted || roadRegion !== region) return;
+    const layer = L.geoJSON(boundary, { pane: 'roadCoverage', style: coverageStyle }).addTo(map);
+    coverageLayer?.remove();
+    coverageLayer = layer;
+  } catch (error) {
+    if (!signal.aborted) console.warn('Showing road graph bounds instead of the boundary.', error);
+  }
+}
 
 export function tooltipText(text) {
   const node = document.createElement('span');
@@ -119,9 +157,12 @@ export function setMapHint(text = '') {
 }
 
 const legendEntries = {
+  coverage: ['Road network extent', '#354d65', 'dashed'],
+  start: ['Start A', 'point-a'],
+  destination: ['Destination B', 'point-b'],
   route: ['Current route', '#1e4ba8'],
   previous: ['Original route (reference)', '#626b75', 'dashed'],
-  closures: ['Closed road', '#d7263d'],
+  closures: ['Closed road', '#d7263d', 'dashed'],
   explored: ['Explored', '#a46a13'],
   frontier: ['Discovered', '#a46a13', 'dotted'],
   forward: ['Forward search', '#a46a13'],
@@ -135,7 +176,12 @@ export function setLegend(key, visible) {
   if (active.has(key) === visible) return;
   if (visible) active.add(key); else active.delete(key);
   $('legendItems').innerHTML = Object.entries(legendEntries).filter(([id]) => active.has(id))
-    .map(([id, [label, color, pattern]]) => `<li class="${traces.has(id) ? 'trace-legend' : ''}"><i class="swatch ${pattern || ''}" style="--swatch:${color}" aria-hidden="true"></i>${label}</li>`).join('');
+    .map(([id, [label, color, pattern]]) => {
+      const symbol = color.startsWith('point-')
+        ? `<img class="legend-pin" src="assets/icons/display/${color}.png" alt="">`
+        : `<i class="swatch ${pattern || ''}" style="--swatch:${color}" aria-hidden="true"></i>`;
+      return `<li class="legend-${id} ${traces.has(id) ? 'trace-legend' : ''}">${symbol}${label}</li>`;
+    }).join('');
   $('mapLegend').hidden = !active.size;
 }
 
@@ -145,9 +191,7 @@ const container = map.getContainer();
 function resizeMap() {
   const { x, y } = map.getSize();
   if (x === container.clientWidth && y === container.clientHeight) return;
-  const fit = framing;
   map.invalidateSize({ animate: false, debounceMoveend: true });
-  if (fit) fitTrip(fit.points, fit.maxZoom);
 }
 on('workspace:changed', resizeMap);
 new ResizeObserver(resizeMap).observe(container);

@@ -3,28 +3,31 @@ import { $ } from '../utils/dom.js';
 
 export function initWorkspace() {
   const nav = [...document.querySelectorAll('[data-mode]')];
-  let mode = 'route';
-  const setPanel = visible => {
-    $('panel').hidden = !visible;
-    $('workspace').classList.toggle('panel-hidden', !visible);
-    $('panelToggle').setAttribute('aria-expanded', visible);
-    $('panelToggle').textContent = visible ? 'Hide panel' : 'Show panel';
-    if (!visible) emit('workspace:changed', null);
-  };
-  const select = next => {
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  let mode = 'route', expanded = true;
+  const select = (next, open) => {
     mode = next;
+    expanded = open;
+    $('panel').hidden = !open;
+    $('workspace').classList.toggle('panel-hidden', !open);
     for (const button of nav) {
       const active = button.dataset.mode === mode;
       if (active) button.setAttribute('aria-current', 'true');
       else button.removeAttribute('aria-current');
-      $(button.getAttribute('aria-controls')).hidden = !active;
+      button.setAttribute('aria-expanded', String(active && open));
+      $(button.getAttribute('aria-controls')).hidden = !active || !open;
     }
-    setPanel(true);
-    emit('workspace:changed', mode);
+    emit('workspace:changed', open ? mode : null);
   };
-  nav.forEach(button => { button.onclick = () => select(button.dataset.mode); });
-  $('panelToggle').onclick = () => {
-    if ($('panel').hidden) select(mode);
-    else setPanel(false);
-  };
+  nav.forEach(button => {
+    button.onclick = () => select(button.dataset.mode, button.dataset.mode !== mode || !expanded);
+    // The artwork ignores pointer events, so offsets stay relative to the
+    // button and the highlight does not need to read layout on each move.
+    button.addEventListener('pointermove', event => {
+      if (event.pointerType !== 'mouse' || reduceMotion.matches) return;
+      button.style.setProperty('--light-x', event.offsetX + 'px');
+      button.style.setProperty('--light-y', event.offsetY + 'px');
+    });
+  });
+  select(mode, expanded);
 }

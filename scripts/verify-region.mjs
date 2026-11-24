@@ -88,10 +88,14 @@ const links = { start, short, long };
 if (fixture.bridge) links.bridge = nearest(fixture.bridge);
 if (fixture.disconnected) links.disconnected = nearest(fixture.disconnected);
 if (fixture.islandDestination) links.islandDestination = nearest(fixture.islandDestination);
+if (fixture.viaCapiz) links.viaCapiz = nearest(fixture.viaCapiz);
+if (fixture.viaAntique) links.viaAntique = nearest(fixture.viaAntique);
 let shortPath;
 for (const mode of ['fast', 'short']) {
   shortPath = audit('short', graph, start.i, short.i, mode);
   audit('long', graph, start.i, long.i, mode);
+  if (links.viaCapiz) audit('Iloilo–Capiz', graph, start.i, links.viaCapiz.i, mode);
+  if (links.viaAntique) audit('Iloilo–Antique', graph, start.i, links.viaAntique.i, mode);
   if (links.bridge) audit('bridge approach', graph, start.i, links.bridge.i, mode);
   if (links.disconnected) audit('unbridged island', graph, start.i, links.disconnected.i, mode, false);
   if (links.islandDestination) audit('within unbridged island', graph, links.disconnected.i, links.islandDestination.i, mode);

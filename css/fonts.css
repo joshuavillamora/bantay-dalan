@@ -1,28 +1,14 @@
 @font-face {
-  font-family: "IBM Plex Sans";
+  font-family: "Geist Sans";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../assets/vendor/geist/Geist-Variable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Anton";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("../assets/vendor/plex-sans/IBMPlexSans-Regular.woff2") format("woff2");
-}
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("../assets/vendor/plex-sans/IBMPlexSans-Medium.woff2") format("woff2");
-}
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("../assets/vendor/plex-sans/IBMPlexSans-SemiBold.woff2") format("woff2");
-}
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url("../assets/vendor/plex-sans/IBMPlexSans-Bold.woff2") format("woff2");
+  src: url("../assets/vendor/anton/Anton-Regular.ttf") format("truetype");
 }

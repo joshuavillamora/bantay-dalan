@@ -9,7 +9,8 @@ import { connectionMessage } from './route-status.js';
 import { fmtD } from '../utils/format.js';
 import { emit, on } from '../events.js';
 import { isDrawing } from './closure-tool.js';
-import { regionsForPoint } from './routing-region.js';
+import { regionsForPoint, selectRoutingRegion } from './routing-region.js';
+import { regionLabel } from '../ui/region-labels.js';
 
 let picking = null, routeMode = true, locationRequest = 0, graph;
 
@@ -18,13 +19,21 @@ function showRoadAccess(which) {
   if (!graph || !point) return;
   const field = $(which === 's' ? 'from' : 'to');
   const hint = $(field.id + 'Access');
-  const { i, d, reason } = snapRoutePoint(graph, point);
+  const { i, d, reason, access } = snapRoutePoint(graph, point);
   hint.classList.toggle('snap-details', i >= 0);
   hint.hidden = false;
   if (i < 0) {
     const candidate = regionsForPoint(point).find(region => region !== graph.region);
-    field.setAttribute('aria-invalid', String(!candidate));
-    hint.textContent = candidate ? `Routing can check this point in ${candidate.name}.` : connectionMessage(reason);
+    field.setAttribute('aria-invalid', 'true');
+    hint.textContent = connectionMessage(candidate && reason === 'outside' ? 'outsideActive' : reason);
+    if (candidate) {
+      const switchNetwork = document.createElement('button');
+      switchNetwork.type = 'button';
+      switchNetwork.className = 'quiet network-offer';
+      switchNetwork.textContent = `Switch to ${regionLabel(candidate)}`;
+      switchNetwork.onclick = () => selectRoutingRegion(candidate);
+      hint.append(' ', switchNetwork);
+    }
     return;
   }
   field.setAttribute('aria-invalid', 'false');
@@ -32,8 +41,10 @@ function showRoadAccess(which) {
   const detail = document.createElement('details');
   const summary = document.createElement('summary');
   const explanation = document.createElement('p');
-  summary.textContent = `Snapped to road · ${distance}`;
-  explanation.textContent = `The pin stays at your selected location. Routing uses a modeled road point ${distance} away in a straight line.`;
+  summary.textContent = access ? `${access} · ${distance}` : `Snapped to road · ${distance}`;
+  explanation.textContent = access
+    ? 'The campus pin marks the place. Driving directions begin or end at the mapped public road, outside the restricted internal network.'
+    : `The pin stays at your selected location. Routing uses a modeled road point ${distance} away in a straight line.`;
   detail.append(summary, explanation);
   hint.replaceChildren(detail);
 }

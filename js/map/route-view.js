@@ -6,10 +6,11 @@ let head, pathLine, pathCase, previous, pathRaf;
 function styleRoutes() {
   const zoom = map.getZoom();
   const photo = map.getContainer().classList.contains('photo-basemap');
+  const network = map.getContainer().classList.contains('network-basemap');
   const width = zoom < 12 ? 4 : zoom >= 17 ? 6 : 5;
   pathLine?.setStyle({ weight: width });
   pathCase?.setStyle({ weight: width + (photo ? 5 : 4) });
-  previous?.setStyle({ weight: width, opacity: photo ? .84 : .7 });
+  previous?.setStyle({ color: network ? '#b6c2cc' : '#626b75', weight: width, opacity: photo || network ? .84 : .7 });
 }
 map.on('zoomend basemapchange', styleRoutes);
 

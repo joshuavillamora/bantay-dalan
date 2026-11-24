@@ -5,5 +5,7 @@ export const fmtT = s => {
   return `${minutes} min`;
 };
 export const fmtD = (m, decimals = 1) => m >= 1000 ? (m / 1000).toFixed(decimals) + ' km' : Math.round(m) + ' m';
+export const fmtRouteDistance = metres => fmtD(metres, 2);
+export const fmtRouteTime = seconds => (seconds / 60).toFixed(2) + ' min';
 export const fmtClosureCount = count => `${count} active ${count === 1 ? 'closure' : 'closures'}`;
 export const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
