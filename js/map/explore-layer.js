@@ -8,6 +8,7 @@ const ExploreLayer = L.Layer.extend({
   initialize() { this.entries = []; this.painted = 0; },
   onAdd(m) {
     this.canvas = document.createElement('canvas');
+    this.canvas.className = 'search-traces';
     this.canvas.style.pointerEvents = 'none';
     m.getPanes().overlayPane.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d');
@@ -54,11 +55,13 @@ const ExploreLayer = L.Layer.extend({
     ctx.beginPath();
     if (!to) {
       ctx.fillStyle = color;
-      ctx.arc(a.x, a.y, kind === 'repair' ? 3 : 1.75, 0, Math.PI * 2);
+      ctx.arc(a.x, a.y, kind === 'repair' ? 2.25 : 1.5, 0, Math.PI * 2);
       if (this.photo) {
         ctx.strokeStyle = '#1b1f24'; ctx.lineWidth = 2; ctx.setLineDash([]); ctx.stroke();
       }
+      ctx.globalAlpha = this.photo ? .95 : .72;
       ctx.fill();
+      ctx.globalAlpha = 1;
       return;
     }
     ctx.setLineDash(kind === 'backward' ? [4, 3] : []);
@@ -66,7 +69,11 @@ const ExploreLayer = L.Layer.extend({
     if (this.photo) {
       ctx.strokeStyle = '#1b1f24'; ctx.lineWidth = 4; ctx.stroke();
     }
-    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = this._map.getZoom() < 13 ? 1.35 : this.photo ? 2.2 : 1.75;
+    ctx.globalAlpha = this.photo ? .95 : .8;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   },
   add(kind, from, to) {
     const entry = [kind, from, to];

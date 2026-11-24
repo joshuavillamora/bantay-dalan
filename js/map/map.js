@@ -1,27 +1,34 @@
 /* Leaflet, basemap layers, and controls shared by the map views. */
 import { MAP_CENTER, MAP_ZOOM, PLACES, DEFAULT_START, DEFAULT_END } from '../config.js';
 import { $ } from '../utils/dom.js';
+import { on } from '../events.js';
 import { initBasemaps } from './basemaps.js';
-import { visitRoadSegments } from '../graph/road-spatial.js';
+import { roadSpatialIndex, visitRoadSegments } from '../graph/road-spatial.js';
 
 export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 export const map = L.map('map', {
-  zoomControl: false, minZoom: 2, maxZoom: 19,
+  zoomControl: false, minZoom: 2, maxZoom: 19, worldCopyJump: true,
   trackResize: false, fadeAnimation: !reducedMotion(), zoomAnimation: !reducedMotion(),
   wheelDebounceTime: 60, wheelPxPerZoomLevel: 100
 }).setView(MAP_CENTER, MAP_ZOOM);
+map.on('moveend', () => {
+  const center = map.getCenter();
+  // Dragging wraps in Leaflet. Keep wheel and keyboard pans in the same world copy.
+  if (center.lng < -180 || center.lng > 180) map.panTo(map.wrapLatLng(center), { animate: false });
+});
 L.control.zoom({ position: 'topright' }).addTo(map);
 L.control.scale({ position: 'bottomright', imperial: false }).addTo(map);
 
 map.createPane('localRoads').style.zIndex = '190';
 map.createPane('previousRoute').style.zIndex = '395';
 map.createPane('closures').style.zIndex = '420';
+map.createPane('closurePreview').style.zIndex = '430';
 const markLocalRoadsReady = initBasemaps(map);
-let localReady = false;
+let removeLocalRoads;
 
 /* The local network sits beneath the tiles so it also covers failed or offline tile requests. */
-export function showLocalRoads(g) {
-  if (localReady) return;
+export function showLocalRoads(g, iloiloLabels) {
+  removeLocalRoads?.();
   const options = { renderer: L.canvas({ pane: 'localRoads' }), interactive: false };
   const minor = L.polyline([], { ...options, color: '#a3b2b2', weight: 1, opacity: .75 }).addTo(map);
   const major = L.polyline([], { ...options, color: '#829899', weight: 2, opacity: .9 }).addTo(map);
@@ -46,26 +53,34 @@ export function showLocalRoads(g) {
     if (!frame && fallbackNeeded()) frame = requestAnimationFrame(updateRoads);
   }
   map.on('moveend', scheduleRoads);
-  map.on('roadfallbackchange', ({ needed }) => {
+  function fallbackChanged({ needed }) {
     if (needed) scheduleRoads();
     else if (renderedBounds) {
       minor.setLatLngs([]); major.setLatLngs([]);
       renderedBounds = undefined;
     }
-  });
+  }
+  map.on('roadfallbackchange', fallbackChanged);
   scheduleRoads();
   const labels = L.layerGroup(['Molo Church', 'Iloilo Esplanade', 'Jaro Cathedral'].map(name => L.marker(PLACES[name], {
     pane: 'localRoads', interactive: false, keyboard: false,
     icon: L.divIcon({ className: 'local-place', html: tooltipText(name), iconSize: [0, 0] })
   })));
   const updateLabels = () => {
-    if (map.getZoom() >= 13) labels.addTo(map);
+    if (iloiloLabels && map.getZoom() >= 13) labels.addTo(map);
     else labels.remove();
   };
   map.on('zoomend', updateLabels);
   updateLabels();
-  localReady = true;
-  markLocalRoadsReady();
+  removeLocalRoads = () => {
+    cancelAnimationFrame(frame);
+    map.off('moveend', scheduleRoads);
+    map.off('roadfallbackchange', fallbackChanged);
+    map.off('zoomend', updateLabels);
+    labels.remove(); minor.remove(); major.remove(); options.renderer.remove();
+  };
+  const [w, s, e, n] = roadSpatialIndex(g).bounds;
+  markLocalRoadsReady(L.latLngBounds([s, w], [n, e]));
 }
 
 export const fitPad = (maxZoom = 16) => {
@@ -105,8 +120,8 @@ export function setMapHint(text = '') {
 
 const legendEntries = {
   route: ['Current route', '#1e4ba8'],
-  previous: ['Original route', '#626b75', 'dashed'],
-  closures: ['Closed road', '#d7263d', 'dashed'],
+  previous: ['Original route (reference)', '#626b75', 'dashed'],
+  closures: ['Closed road', '#d7263d'],
   explored: ['Explored', '#a46a13'],
   frontier: ['Discovered', '#a46a13', 'dotted'],
   forward: ['Forward search', '#a46a13'],
@@ -115,22 +130,27 @@ const legendEntries = {
   chokepoints: ['Ranked road link', '#694897', 'dashed']
 };
 const active = new Set();
+const traces = new Set(['explored', 'frontier', 'forward', 'backward', 'repair']);
 export function setLegend(key, visible) {
   if (active.has(key) === visible) return;
   if (visible) active.add(key); else active.delete(key);
   $('legendItems').innerHTML = Object.entries(legendEntries).filter(([id]) => active.has(id))
-    .map(([, [label, color, pattern]]) => `<li><i class="swatch ${pattern || ''}" style="--swatch:${color}" aria-hidden="true"></i>${label}</li>`).join('');
+    .map(([id, [label, color, pattern]]) => `<li class="${traces.has(id) ? 'trace-legend' : ''}"><i class="swatch ${pattern || ''}" style="--swatch:${color}" aria-hidden="true"></i>${label}</li>`).join('');
   $('mapLegend').hidden = !active.size;
 }
 
 $('studyArea').onclick = showStudyArea;
 
 const container = map.getContainer();
-new ResizeObserver(() => {
+function resizeMap() {
+  const { x, y } = map.getSize();
+  if (x === container.clientWidth && y === container.clientHeight) return;
   const fit = framing;
   map.invalidateSize({ animate: false, debounceMoveend: true });
   if (fit) fitTrip(fit.points, fit.maxZoom);
-}).observe(container);
+}
+on('workspace:changed', resizeMap);
+new ResizeObserver(resizeMap).observe(container);
 
 /* The application assigns wheel behavior explicitly. It does not infer the input device. */
 const wheelMode = $('wheelMode');
@@ -138,11 +158,15 @@ let wheelZoom = false, pendingPan = L.point(0, 0), panFrame = 0;
 wheelMode.onclick = () => {
   wheelZoom = !wheelZoom;
   wheelMode.setAttribute('aria-pressed', wheelZoom);
-  wheelMode.textContent = wheelZoom ? 'Scroll zooms' : 'Scroll pans';
   wheelMode.title = wheelZoom ? 'Scroll zooms the map. Switch to scroll to pan.' : 'Scroll pans the map. Hold Ctrl while scrolling to zoom.';
 };
 container.addEventListener('wheel', event => {
   if (event.target.closest('.leaflet-control, .leaflet-popup') || event.metaKey || event.altKey) {
+    event.stopImmediatePropagation();
+    return;
+  }
+  if (container.classList.contains('drawing-stroke')) {
+    event.preventDefault();
     event.stopImmediatePropagation();
     return;
   }

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "indexes": [
+    {"id":"panay-guimaras","records":18000,"bytes":380964,"sha256":"badd10298fddafe3469f032aa18825636a05ad140a67d811b81e66b47e468d2c"},
+    {"id":"negros-north","records":9748,"bytes":205167,"sha256":"7ddd781882d0278e696ca54608a7cae43eacf82a5316499f2f2a8a95895ea815"},
+    {"id":"negros-south","records":7226,"bytes":155378,"sha256":"b4940d7bd37f1d9114b76ebb8c67727f0ec5495894832cef91c31417afdf5acc"},
+    {"id":"cebu","records":18000,"bytes":382182,"sha256":"e38a2fe957b930002abd1da1f4b5350d0a11a385d7669717eed3f66bb3fef5f2"},
+    {"id":"bohol-siquijor","records":8575,"bytes":186906,"sha256":"2a4c77453bee91b8fa6b554a92e61019b703f1f24131fdba2b00857b94745c30"},
+    {"id":"leyte-samar","records":18000,"bytes":372558,"sha256":"21849d409afb3073e700d9ae00705aad03a97a30783e24f2b9db740f542ead3c"},
+    {"id":"mindoro","records":5077,"bytes":108287,"sha256":"238770618e89dc5f3b6fc527ec2a78022658d7a85a3bd20e1a771e44f2bcc19c"},
+    {"id":"palawan","records":5143,"bytes":115030,"sha256":"67e6f326cbe9b68d53e8dec46d27169fbcfe6592ec6bca3d60b875cc508a3a7c"},
+    {"id":"metro-manila","records":18000,"bytes":411235,"sha256":"ee37243423f9e76776e59520cfe709f5869839f2d06fec34b75224e1c940a6a1"},
+    {"id":"ncr-south","records":18000,"bytes":379535,"sha256":"7bba501ce5c725b5c4870e712a4b3f6b04298a36c02a4f449afb11008ce7f837"},
+    {"id":"calabarzon-east","records":15678,"bytes":327748,"sha256":"442e494c8d74959be1115ff21be015e80220b4f2cfb5945aa331682022e732fe"},
+    {"id":"nueva-ecija","records":18000,"bytes":363268,"sha256":"3281eb57f0ad06aac1247e437b64b1e26eaefda16b10f0ab749e843ba6b6e3ec"},
+    {"id":"cordillera","records":13437,"bytes":291582,"sha256":"d923271d90a5c75daee4bc82dcee80878e14e39a18b9512bbb3a5e1981a77578"},
+    {"id":"ilocos-coast","records":8756,"bytes":187850,"sha256":"335fcc8bde63903ea7fc3b859f02cdd25015753bc36dfc2df5ac05b9c055fdbe"},
+    {"id":"north-cagayan","records":4228,"bytes":86755,"sha256":"ac265a9fbeead03a8c9f41472726082d0d655e5d18a9ceb3ba4064d2d115d346"},
+    {"id":"bicol","records":14991,"bytes":310981,"sha256":"6135ebe51ec9f00391d6cc7285d11be79b1f02e660084822e5d353932b58854b"},
+    {"id":"zamboanga-north","records":6045,"bytes":131110,"sha256":"ba16327380247b036ddd968ce4f890b34dd56d288adf4e92a25fe2a77b1e576f"},
+    {"id":"zamboanga-south","records":4968,"bytes":105951,"sha256":"0a038ebc2fc69411f9ef4f5740ff60a81b9801d80deca131995f4f083abea114"},
+    {"id":"northern-coast","records":8207,"bytes":174542,"sha256":"afd3dda577bb26e9e1291b7d5f392d35ea7bb85a2db5c00c30dfb5bc8c7db431"},
+    {"id":"davao-gulf","records":18000,"bytes":368024,"sha256":"7e03461e624f68d22fc3592dd188721fecbeae24614345286bc2fd96c57b2b2f"},
+    {"id":"sarangani","records":5732,"bytes":123924,"sha256":"4a601996ed3c43635a1868bed1abb72d51626da0d3027956bac378cb3abf1121"},
+    {"id":"maguindanao","records":2660,"bytes":59123,"sha256":"ccf7d363117b869aefdf15d6f0c3e02e751d3670e7d8575b10bc42a7e700b516"},
+    {"id":"philippines-localities","records":2941,"bytes":62494,"sha256":"b8adc7f44e32fb33ee72894183a01b6908e590a53b515cf959606caf92e63ce0"},
+    {"id":"singapore-central-pilot","records":7941,"bytes":168377,"sha256":"32e9acb08ec7c086ee7429d6d5e6048e103ecbe307a57be0d944aef49cf26297"}
+  ]
+}

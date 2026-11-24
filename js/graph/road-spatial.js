@@ -8,8 +8,8 @@ export function roadSpatialIndex(graph) {
   return graph.roadIndex || finishWork(indexSteps(graph));
 }
 
-export async function prepareRoadSpatialIndex(graph) {
-  if (!graph.roadIndex) await runInSlices(indexSteps(graph), { stride: 1 });
+export async function prepareRoadSpatialIndex(graph, keepGoing) {
+  if (!graph.roadIndex) await runInSlices(indexSteps(graph), { stride: 1, keepGoing });
 }
 
 function* indexSteps(graph) {
@@ -40,10 +40,19 @@ function* indexSteps(graph) {
 }
 
 export function visitRoadSegments(graph, [w, s, e, n], visit) {
+  const size = graph.lat.length;
+  for (const segment of roadSegmentKeysIn(graph, [w, s, e, n])) {
+    const u = Math.floor(segment / size), v = segment % size;
+    visit(u, v, graph.adj[u].find(edge => edge[0] === v)[2]);
+  }
+}
+
+// Each key represents one physical segment and uses a direction present in the graph.
+export function* roadSegmentKeysIn(graph, [w, s, e, n]) {
   const { bounds, bins } = roadSpatialIndex(graph);
   const west = cell(Math.max(bounds[0], w)), east = cell(Math.min(bounds[2], e));
   const south = cell(Math.max(bounds[1], s)), north = cell(Math.min(bounds[3], n));
-  const { lat, lng, adj } = graph, size = lat.length;
+  const { lat, lng } = graph, size = lat.length;
   for (let x = west; x <= east; x++) {
     for (let y = south; y <= north; y++) {
       const segments = bins.get(key(x, y));
@@ -54,7 +63,7 @@ export function visitRoadSegments(graph, [w, s, e, n], visit) {
         // Visit a segment once, in its first cell inside the query.
         if (x !== Math.max(west, cell(left)) || y !== Math.max(south, cell(bottom))) continue;
         if (left > e || Math.max(lng[u], lng[v]) < w || bottom > n || Math.max(lat[u], lat[v]) < s) continue;
-        visit(u, v, adj[u].find(edge => edge[0] === v)[2]);
+        yield segment;
       }
     }
   }

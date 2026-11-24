@@ -8,7 +8,8 @@ import { snapRoutePoint } from '../graph/road-graph.js';
 import { connectionMessage } from './route-status.js';
 import { fmtD } from '../utils/format.js';
 import { emit, on } from '../events.js';
-import { isDrawing, handleMapClick } from './closures.js';
+import { isDrawing } from './closure-tool.js';
+import { regionsForPoint } from './routing-region.js';
 
 let picking = null, routeMode = true, locationRequest = 0, graph;
 
@@ -18,17 +19,31 @@ function showRoadAccess(which) {
   const field = $(which === 's' ? 'from' : 'to');
   const hint = $(field.id + 'Access');
   const { i, d, reason } = snapRoutePoint(graph, point);
-  field.setAttribute('aria-invalid', String(i < 0));
-  hint.textContent = i < 0
-    ? connectionMessage(reason)
-    : d >= 1 ? `The pin marks your location. The route uses a modeled road point ${fmtD(d)} away in a straight line.` : '';
-  hint.hidden = !hint.textContent;
+  hint.classList.toggle('snap-details', i >= 0);
+  hint.hidden = false;
+  if (i < 0) {
+    const candidate = regionsForPoint(point).find(region => region !== graph.region);
+    field.setAttribute('aria-invalid', String(!candidate));
+    hint.textContent = candidate ? `Routing can check this point in ${candidate.name}.` : connectionMessage(reason);
+    return;
+  }
+  field.setAttribute('aria-invalid', 'false');
+  const distance = fmtD(d);
+  const detail = document.createElement('details');
+  const summary = document.createElement('summary');
+  const explanation = document.createElement('p');
+  summary.textContent = `Snapped to road · ${distance}`;
+  explanation.textContent = `The pin stays at your selected location. Routing uses a modeled road point ${distance} away in a straight line.`;
+  detail.append(summary, explanation);
+  hint.replaceChildren(detail);
 }
 const movePin = (which, ll) => {
   if (routeMode && !picking && !isDrawing()) setPoint(which, [ll.lat, ll.lng], 'Pinned point');
   else setPointMarker(which, which === 's' ? state.start : state.end, state.names[which], movePin);
 };
 function updatePoint(which, ll, name) {
+  const { lat, lng } = map.wrapLatLng(ll);
+  ll = [lat, lng];
   if (which === 's') { state.start = ll; locationRequest++; } else state.end = ll;
   state.names[which] = name;
   setPointMarker(which, ll, name, movePin);
@@ -60,13 +75,12 @@ function setPicking(which) {
 export function initRoutePoints() {
   on('graph:ready', g => { graph = g; showRoadAccess('s'); showRoadAccess('e'); });
   const click = ll => {
-    if (isDrawing()) { handleMapClick(ll); return; }
-    if (picking) setPoint(picking, [ll.lat, ll.lng], 'Pinned point');
+    if (picking && !isDrawing()) setPoint(picking, [ll.lat, ll.lng], 'Pinned point');
   };
   map.on('click', e => click(e.latlng));
   const container = map.getContainer();
   container.addEventListener('keydown', e => {
-    if (e.target === container && e.key === 'Enter' && (picking || isDrawing())) {
+    if (e.target === container && e.key === 'Enter' && picking && !isDrawing()) {
       e.preventDefault();
       click(map.getCenter());
     }

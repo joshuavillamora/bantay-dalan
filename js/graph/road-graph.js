@@ -1,4 +1,4 @@
-/* The road network: loads the roads JSON once and builds an adjacency-list graph.
+/* Decode a road dataset into a directed adjacency list.
    Graph shape: { lat[], lng[], adj[][], ways[] } where adj[u] = [[v, metres, km/h, wayIndex], ...] (directed edges)
    and ways[wayIndex] is the road's name. */
 import { ROADS_URL, SPEED, DEFAULT_ROAD_SPEED, ROUTE_SNAP_LIMIT_METRES, ROUTE_ROAD_PROXIMITY_METRES } from '../config.js';
@@ -26,18 +26,76 @@ function putEdge(edges, used, to, distance, speed, way) {
 
 export async function loadGraph() {
   if (graph) return graph;
-  if (!pending) pending = (async () => {
-    const r = await fetch(ROADS_URL);
-    if (!r.ok) throw new Error(ROADS_URL + ' not found (' + r.status + ')');
-    const data = ROADS_URL.endsWith('.gz')
-      ? await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).json()
-      : await r.json();
-    const { value: built } = await runInSlices(decodeSteps(data), { stride: 1 });
-    await prepareRoadSpatialIndex(built);
-    graph = built;
-    return graph;
-  })();
-  try { return await pending; } catch (e) { pending = null; throw e; }
+  if (!pending) pending = fetchRoadGraph(ROADS_URL).then(built => graph ??= built).finally(() => { pending = null; });
+  return pending;
+}
+
+export function setLoadedGraph(built) { graph = built; }
+
+export async function fetchRoadGraph(url, { dataset, signal, onProgress = () => {} } = {}) {
+  const check = () => signal?.throwIfAborted();
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(url + ' not found (' + response.status + ')');
+  let body = response.body;
+  const timings = {};
+  let start = performance.now();
+  if (dataset) {
+    // Validate the compressed bytes against the manifest before decoding the graph.
+    const bytes = new Uint8Array(dataset.bytes);
+    const reader = body.getReader();
+    let offset = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (offset + value.length > bytes.length) throw new Error('Road dataset exceeds its published size');
+        bytes.set(value, offset);
+        offset += value.length;
+        onProgress('Downloading roads', Math.floor(offset * 100 / bytes.length));
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    timings.download = performance.now() - start;
+    check();
+    if (offset !== bytes.length) throw new Error('Incomplete road dataset');
+    onProgress('Verifying dataset');
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    const actual = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+    if (actual !== dataset.sha256) throw new Error('Road dataset checksum mismatch');
+    body = new Blob([bytes]).stream();
+  }
+  check();
+  start = performance.now();
+  onProgress('Reading road data');
+  const data = url.endsWith('.gz')
+    ? await new Response(body.pipeThrough(new DecompressionStream('gzip'))).json()
+    : await response.json();
+  timings.parse = performance.now() - start;
+  check();
+  if (dataset && (data.format !== 'bantay-roads-v1' || data.coordinates?.length !== dataset.vertices * 2 ||
+    (dataset.scope && (data.scope !== dataset.scope || data.pbfSha256 !== dataset.source || data.replicationTimestamp !== dataset.version)))) {
+    throw new Error('Road dataset metadata mismatch');
+  }
+  onProgress('Building directed graph');
+  start = performance.now();
+  const work = { stride: 1, keepGoing: () => !signal?.aborted };
+  const decoded = await runInSlices(decodeSteps(data), work);
+  check();
+  const built = decoded.value;
+  timings.build = performance.now() - start;
+  if (dataset && built.edgeCount !== dataset.edges) throw new Error('Road dataset edge count mismatch');
+  onProgress('Indexing roads');
+  start = performance.now();
+  await prepareRoadSpatialIndex(built, work.keepGoing);
+  check();
+  timings.spatial = performance.now() - start;
+  if (dataset && roadSpatialIndex(built).bounds.some((value, i) => value !== dataset.bounds[i])) {
+    throw new Error('Road dataset extent mismatch');
+  }
+  built.loadTimings = timings;
+  return built;
 }
 
 export function buildGraph(elements) {
@@ -81,6 +139,7 @@ function* decodeSteps(data) {
   }
   const size = lat.length, degrees = new Uint32Array(size);
   let processed = 0;
+  // Count each direction before allocating rows so large graphs can fill the arrays directly.
   for (const [, directions, , nodes] of data.ways) {
     for (let i = 1; i < nodes.length; i++) {
       if (nodes[i - 1] === nodes[i]) continue;
@@ -110,8 +169,12 @@ function* decodeSteps(data) {
     }
     if (++processed % 512 === 0) yield;
   }
-  for (let i = 0; i < size; i++) adj[i].length = used[i];
-  return { lat, lng, adj, ways };
+  let edgeCount = 0;
+  for (let i = 0; i < size; i++) {
+    adj[i].length = used[i];
+    edgeCount += used[i];
+  }
+  return { lat, lng, adj, ways, edgeCount };
 }
 
 /* index of the closest road node to [lat, lng] */
@@ -153,6 +216,7 @@ export function snapRoutePoint(g, point) {
   if (box[2] < w || box[3] < s || box[0] > e || box[1] > n) return { ...noRoad, reason: 'outside' };
 
   let best = noRoad, roadDistance = ROUTE_ROAD_PROXIMITY_METRES;
+  // Pick the closest modeled segment, then use its nearest eligible vertex for routing.
   visitRoadSegments(g, box, (u, v) => {
     const x = (g.lng[u] - lng) * scale, y = g.lat[u] - lat;
     const dx = (g.lng[v] - g.lng[u]) * scale, dy = g.lat[v] - g.lat[u];

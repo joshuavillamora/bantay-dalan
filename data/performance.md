@@ -1,5 +1,7 @@
 # CHOKEPOINT performance report
 
+These measurements describe an earlier optimization pass. See [the current handover](../HANDOVER.md) for the worldwide search provider and revised desktop, mobile, and regional measurements.
+
 ## Verified bottlenecks
 
 1. **Covered road geometry was being rebuilt on map movement.** The old fallback renderer maintained two Leaflet Canvas polylines and recreated their segment arrays on every `moveend`, including when opaque basemap tiles covered the roads. Eight scripted pans and one zoom took **1,335 ms** of synchronous work on the throttled viewport. The layers were few, but their geometry was large.

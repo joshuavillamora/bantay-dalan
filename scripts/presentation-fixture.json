@@ -1,0 +1,10 @@
+{
+  "start": "Plaza Libertad",
+  "end": "SM City Iloilo",
+  "mode": "fast",
+  "road": "Benigno S. Aquino Jr. Avenue",
+  "edge": [3409, 3410],
+  "zoom": 18,
+  "center": [10.7164489, 122.55274835],
+  "line": [[10.71645088, 122.55285333], [10.71644692, 122.55264337]]
+}

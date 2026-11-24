@@ -3,6 +3,8 @@ import { $ } from '../utils/dom.js';
 import { fmtD, fmtT } from '../utils/format.js';
 
 export function refreshControls() {
+  $('queueCount').hidden = !state.run?.visual;
+  $('playback').classList.toggle('search-running', !!state.run?.visual);
   $('go').disabled = !state.graphReady;
   $('visualize').disabled = !state.graphReady;
   $('pause').disabled = !state.run?.visual;
@@ -41,7 +43,7 @@ export function renderImpact(current, original, closures, pending = false) {
   }
   let summary = pending === 'failed' ? 'Could not recalculate the route. Try finding it again.' : 'Recalculating for the current closures…';
   if (!pending) {
-    if (!current?.path) summary = current?.failure || 'The trip remains unreachable.';
+    if (!current?.path) summary = 'Current route unavailable.';
     else if (!original.path) summary = 'A route is now available.';
     else if (samePath(original.path, current.path)) summary = 'The optimal route is unchanged.';
     else {
@@ -60,7 +62,7 @@ export function renderImpact(current, original, closures, pending = false) {
   $('routeImpact').textContent = summary;
   details.innerHTML = `<table>
     <thead><tr><th scope="col">Scenario</th><th scope="col">Distance</th><th scope="col">Est. travel</th></tr></thead>
-    <tbody><tr><th scope="row">Original<small>${scenarioLabel(original.closures)}</small></th>${cells(original)}</tr>
+    <tbody><tr><th scope="row">Original<small>Reference · ${scenarioLabel(original.closures)}</small></th>${cells(original)}</tr>
     <tr><th scope="row">Current<small>${scenarioLabel(closures)}</small></th>${cells(current)}</tr></tbody>
   </table><p class="hint">${costName(original.mode)} · same endpoints and fixed road speeds</p>`;
 }

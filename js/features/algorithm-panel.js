@@ -9,7 +9,7 @@ export function initAlgorithmPanel() {
   const select = $('algo');
   select.innerHTML = Object.entries(ALGORITHMS).filter(([, algo]) => !algo.baseline)
     .map(([id, algo]) => `<option value="${id}">${algo.name}</option>`).join('');
-  const showInfo = () => { $('info').textContent = ALGORITHMS[select.value].info; };
+  const showInfo = () => { $('info').textContent = ALGORITHMS[select.value]?.info ?? ''; };
   select.onchange = () => { showInfo(); emit('settings:changed', 'algorithm'); };
   showInfo();
 

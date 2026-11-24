@@ -6,7 +6,7 @@ import { ALGORITHMS } from '../algorithms/index.js';
 import { lpaReady, lpaReset, lpaRepair } from '../algorithms/lpa-star.js';
 import { prepareReverseAdjacency, snapRouteEndpoints, snapRoutePoint, routeMetrics } from '../graph/road-graph.js';
 import { blockedEdges } from '../graph/closure-filter.js';
-import { fitTrip, reducedMotion } from '../map/map.js';
+import { fitTrip } from '../map/map.js';
 import { exploreLayer } from '../map/explore-layer.js';
 import { showHead, moveHead, hideHead, clearRoute, animateRoute, showPreviousRoute } from '../map/route-view.js';
 import { refreshControls, setStatus, setCounts, showPlayback, renderRoute, renderImpact, samePath } from '../ui/dashboard.js';
@@ -14,6 +14,7 @@ import { renderRepair } from '../ui/results-table.js';
 import { getClosures, getRoutingGraph } from './closures.js';
 import { selectedAlgorithm } from './algorithm-panel.js';
 import { connectionMessage, noRouteMessage } from './route-status.js';
+import { cancelRegionLoad, currentTripGraph, prepareTripRegion } from './routing-region.js';
 
 let base, searchView;
 const stepsPerFrame = () => Math.pow(10, (+$('spd').value - 25) / 25);
@@ -49,7 +50,7 @@ function startRun({ visual = false, changed = false, repair = false } = {}) {
   const prior = changed ? null : state.route || state.run?.prior;
   cancelRun(); setMessage(); clearRoute();
   if (!repair) { clearSearch(); lpaReset(); renderRepair(null); }
-  else setCounts(0);
+  else { setCounts(0); renderRepair(null); }
   state.route = null;
 
   const closures = getClosures();
@@ -69,7 +70,7 @@ function startRun({ visual = false, changed = false, repair = false } = {}) {
   }
 
   const key = selectedAlgorithm(), algo = ALGORITHMS[key], mode = state.mode;
-  const animate = visual && !reducedMotion();
+  const animate = visual;
   const run = { id: state.runId, name: algo.name, s, t, mode, closures, changed, repair, visual, animate, prior,
     usesClosureKeys: algo.handlesClosures, count: 0, acc: 0, ms: 0 };
   const start = performance.now();
@@ -194,7 +195,10 @@ function routeResult(run, path) {
 function finish(run, route) {
   state.run = null; state.paused = false; refreshControls();
   state.route = route;
-  if (run.repair) renderRepair({ ...run, path: route.path });
+  if (run.repair) {
+    const { graph, s, t, mode, closures, count, ms } = run;
+    renderRepair({ context: { graph, s, t, mode, closures }, count, ms, path: route.path, dist: route.dist, time: route.time });
+  }
   displayRoute(route, run);
 }
 
@@ -239,11 +243,23 @@ function displayRoute(route, run, cancelled = false) {
 export function initRunController() {
   exploreLayer.on('error', ({ error }) => failedSearchView(error));
   on('graph:ready', g => {
+    if (base && base !== g) invalidate();
     base = g; state.graphReady = true;
     setStatus('Ready to route'); refreshControls();
   });
-  $('go').onclick = () => startRun();
-  $('visualize').onclick = () => startRun({ visual: true });
+  async function requestedRun(visual) {
+    if (currentTripGraph()) { startRun({ visual }); return; }
+    const { graph, message, reason } = await prepareTripRegion();
+    if (graph) startRun({ visual });
+    else if (message) {
+      invalidate(message);
+      const heading = { disconnected: 'No route available', differentRegions: 'No route available', loadFailed: 'Road network unavailable' };
+      setStatus(heading[reason] || 'Endpoint unavailable');
+      setMessage(message);
+    }
+  }
+  $('go').onclick = () => requestedRun(false);
+  $('visualize').onclick = () => requestedRun(true);
   $('pause').onclick = () => {
     if (!state.run) return;
     state.paused = !state.paused;
@@ -261,7 +277,7 @@ export function initRunController() {
     refreshControls();
     if (!state.run.preparing) state.raf = requestAnimationFrame(frame);
   };
-  $('reset').onclick = () => { invalidate(); setStatus('Search reset'); };
+  $('reset').onclick = () => { cancelRegionLoad(); invalidate(); setStatus('Search reset'); };
 
   on('route:changed', () => invalidate(state.route || state.run ? 'Endpoints changed. Find the route again.' : undefined));
   on('settings:changed', setting => {
