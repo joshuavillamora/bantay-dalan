@@ -4,32 +4,21 @@ import { snapRoutePoint } from '../graph/road-graph.js';
 import { hav } from '../utils/geo.js';
 import { runInSlices } from '../utils/work-slices.js';
 
-export function geocoderFor(hostname) {
-  const [lat, lon] = MAP_CENTER;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return {
-      name: 'Stadia Maps', credit: 'https://stadiamaps.com/attribution/',
-      url(query) {
-        return 'https://api.stadiamaps.com/geocoding/v1/autocomplete?' + new URLSearchParams({
-          text: query, size: 12, sources: 'openstreetmap',
-          'focus.point.lat': lat, 'focus.point.lon': lon
-        });
-      },
-    };
+export const placeGeocoder = {
+  name: 'Photon', credit: 'https://photon.komoot.io/',
+  url(query) {
+    const [lat, lon] = MAP_CENTER;
+    return PHOTON_URL + '?' + new URLSearchParams({
+      q: query, limit: 12, lat, lon, zoom: 9, location_bias_scale: 0.65
+    });
   }
-  return {
-    name: 'Photon', credit: 'https://photon.komoot.io/',
-    url(query) {
-      return PHOTON_URL + '?' + new URLSearchParams({
-        q: query, limit: 12, lat, lon
-      });
-    },
-  };
-}
+};
 
 const clean = value => typeof value === 'string' ? value.trim() : '';
-export const placeWords = value => value.normalize('NFD').replace(/\p{M}/gu, '')
-  .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+export const placeWords = value => value.normalize('NFKD').replace(/(\p{Script=Latin})\p{M}+/gu, '$1')
+  .normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ').trim();
+const eastAsian = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+export const canSearchOnline = words => [...words.replaceAll(' ', '')].length >= (eastAsian.test(words) ? 2 : 3);
 
 const abbreviations = { gen: 'general', ave: 'avenue', av: 'avenue', blvd: 'boulevard', rd: 'road', st: 'street' };
 const nameTerms = value => placeWords(value).replace(/\bmunicipal hall\b/g, 'town hall').split(' ')
@@ -37,6 +26,10 @@ const nameTerms = value => placeWords(value).replace(/\bmunicipal hall\b/g, 'tow
   .map(word => Object.hasOwn(abbreviations, word) ? abbreviations[word] : word);
 
 const osmTypes = { N: 'node', W: 'way', R: 'relation' };
+const placeZoom = { country: 5, state: 8, region: 8, province: 8, county: 10, city: 11, town: 12,
+  village: 13, district: 13, locality: 13, suburb: 13, neighbourhood: 14, street: 15 };
+const localZoom = { Region: 8, Province: 9, 'Province or state': 9, Island: 10, City: 11,
+  Town: 12, Municipality: 12, 'Village or barangay': 13, Barangay: 13, Neighborhood: 14 };
 
 export function geocodedMatches(features, graph) {
   const items = [];
@@ -52,20 +45,26 @@ export function geocodedMatches(features, graph) {
     if (!name) continue;
     const country = clean(p.country);
     const area = [p.district, p.locality, p.localadmin, p.city, p.county, p.region, p.state, country].map(clean).filter(Boolean);
-    const detail = [...new Set([address, ...area].filter(value => value && placeWords(value) !== placeWords(name)))];
-    if (country && country !== 'Philippines' && detail.indexOf(country) > 2) detail.splice(2, 0, country);
+    const context = [clean(p.city || p.localadmin), clean(p.state || p.region), clean(p.district || p.county || p.locality)]
+      .filter(value => value && value !== country && placeWords(value) !== placeWords(name));
+    const contextLabels = [...new Set(context)].slice(0, country ? 2 : 3);
+    if (country) contextLabels.push(country);
     const id = osmTypes[p.osm_type] && p.osm_id ? `${osmTypes[p.osm_type]}/${p.osm_id}` : clean(p.id) || clean(p.gid);
     const wikiTitle = clean(p.addendum?.osm?.wikipedia).replace(/^[a-z-]+:/i, '').replaceAll('_', ' ');
+    const kind = p.osm_key === 'place' ? clean(p.osm_value) || clean(p.type) : clean(p.type);
+    const typeLabel = clean(p.osm_value).replaceAll('_', ' ');
+    const cityAlias = kind === 'city' && !/\bcity\b/i.test(name) ? name + ' City' : '';
     const ll = [lat, lon];
     const snap = graph && snapRoutePoint(graph, ll);
     items.push({
       id, name, ll, address, number,
-      aliases: [wikiTitle].filter(Boolean),
+      aliases: [wikiTitle, cityAlias].filter(Boolean),
       area: area.join(' '),
       district: clean(p.district || p.city || p.county),
-      street: p.layer === 'street' || p.type === 'street',
+      street: p.type === 'street' || p.layer === 'street',
+      zoom: Object.hasOwn(placeZoom, kind) ? placeZoom[kind] : 16,
       nearRoad: snap ? snap.i >= 0 : undefined, roadIssue: snap?.reason,
-      detail: detail.slice(0, 3).join(', ')
+      detail: [...new Set([typeLabel, address !== name && address, contextLabels.join(', ')].filter(Boolean))].join(' · ')
     });
   }
   return items;
@@ -88,7 +87,7 @@ export async function cityPlaceIndex(data) {
     for (const [i, [id, name, lat, lng, kind, ...aliases]] of data.entries.entries()) {
       const category = data.kinds[kind], area = data.city;
       const place = { id, name, ll: [lat / 1e6, lng / 1e6], aliases, area, district: area,
-        street: category === 'Street', local: true, detail: `${category} · ${area}` };
+        street: category === 'Street', local: true, zoom: localZoom[category], detail: `${category} · ${area}` };
       const keys = new Set(searchTerms(place).names.flat().flatMap(word => [word.slice(0, 1), word.slice(0, 2)]));
       for (const key of keys) {
         if (!prefixes.has(key)) prefixes.set(key, []);
@@ -127,8 +126,16 @@ export function mergeMatches(query, saved, remote = []) {
   const terms = nameTerms(query);
   if (!terms.length) return [];
   const typed = terms.join(' ');
-  const online = new Set(remote);
-  const ranked = [...saved, ...remote].map(place => ({ place, score: nameScore(place, terms, typed) }))
+  const online = new Map(remote.map((place, index) => [place, index]));
+  const nativeQuery = eastAsian.test(typed) && !/\p{Script=Latin}/u.test(typed);
+  const ranked = [...saved, ...remote].map(place => {
+    let score = nameScore(place, terms, typed);
+    // Photon can match a native name while returning a translated display label.
+    if (!score && nativeQuery && online.get(place) < 2 && !eastAsian.test(place.name)) {
+      score = place.zoom <= 11 ? 3.5 : 2;
+    }
+    return { place, score };
+  })
     .filter(result => result.score > 0)
     .sort((a, b) => b.score - a.score || Number(a.place.nearRoad === false) - Number(b.place.nearRoad === false));
   const items = [];

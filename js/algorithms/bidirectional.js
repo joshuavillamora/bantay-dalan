@@ -15,6 +15,7 @@ export function* bidirectional(g, s, t, mode) {
   let mu = Infinity, meet = -1;
   for (;;) {
     const tf = top(0), tb = top(1);
+    // The two unsettled costs bound any route that could still beat the known meeting cost.
     if (tf === Infinity || tb === Infinity || tf + tb >= mu) break;
     const k = tf <= tb ? 0 : 1, o = 1 - k, u = heap[k].pop();
     done[k][u] = 1;
@@ -22,6 +23,7 @@ export function* bidirectional(g, s, t, mode) {
     const found = [];
     const end = k ? offsets[u + 1] : g.adj[u].length;
     for (let i = k ? offsets[u] : 0; i < end; i++) {
+      // Traverse incoming edges backward with their original directed costs.
       const [to, d, sp] = k ? g.adj[vertices[i]][indices[i]] : g.adj[u][i];
       const v = k ? vertices[i] : to;
       if (done[k][v]) continue;

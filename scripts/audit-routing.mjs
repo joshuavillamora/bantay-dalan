@@ -7,16 +7,19 @@ import { gunzipSync } from 'node:zlib';
 import { ALGORITHMS } from '../js/algorithms/index.js';
 import { heuristic } from '../js/algorithms/common.js';
 import { lpaFresh, lpaRepair, lpaReset } from '../js/algorithms/lpa-star.js';
-import { DEFAULT_ROAD_SPEED, MAX_SPEED_MS, PLACES, ROADS_URL, SPEED } from '../js/config.js';
+import { CHOKEPOINTS, DEFAULT_ROAD_SPEED, MAX_SPEED_MS, PLACES, ROADS_URL, SPEED } from '../js/config.js';
 import { Heap } from '../js/core/heap.js';
 import { blockedEdges, removeClosedRoads } from '../js/graph/closure-filter.js';
-import { decodeRoadGraph, reverseAdjacency, routeMetrics, snapRoutePoint } from '../js/graph/road-graph.js';
+import { selectRoads } from '../js/graph/closure-selection.js';
+import { decodeRoadGraph, nearestRoadVertex, reverseAdjacency, routeMetrics, snapRoutePoint } from '../js/graph/road-graph.js';
+import { findChokepoints } from '../js/analysis/chokepoints.js';
 import { chordDistance, hav } from '../js/utils/geo.js';
 
 const bytes = readFileSync(new URL('../' + ROADS_URL, import.meta.url));
 let dataset = JSON.parse(gunzipSync(bytes));
 const graph = decodeRoadGraph(dataset);
 const locations = JSON.parse(readFileSync(new URL('benchmark-destinations.json', import.meta.url)));
+const demo = JSON.parse(readFileSync(new URL('presentation-fixture.json', import.meta.url)));
 const warmups = 3, repeats = 9;
 const algorithms = Object.entries(ALGORITHMS);
 const modes = ['short', 'fast'];
@@ -175,6 +178,20 @@ const closedUrban = removeClosedRoads(graph, isolate);
 assert.notEqual(reference(closedAirport, plaza, airport, 'fast').cost, reference(graph, plaza, airport, 'fast').cost);
 assert.ok(reference(closedAirport, plaza, airport, 'fast').path);
 
+const demoStart = snap(PLACES[demo.start]), demoGoal = snap(PLACES[demo.end]);
+const [demoFrom, demoTo] = demo.edge, demoSize = graph.lat.length;
+const degreesPerPixel = 360 / (256 * 2 ** demo.zoom);
+const demoSelection = exhaust(selectRoads(graph, demo.line, {
+  pixel: [degreesPerPixel * Math.cos(demo.center[0] * Math.PI / 180), degreesPerPixel]
+})).path;
+assert.deepEqual([...demoSelection.keys], [demoFrom * demoSize + demoTo]);
+assert.equal(graph.ways[graph.adj[demoFrom].find(edge => edge[0] === demoTo)[3]], demo.road);
+const demoClosures = [demoSelection], closedDemo = removeClosedRoads(graph, demoClosures);
+const demoOpenPath = reference(graph, demoStart, demoGoal, demo.mode).path;
+assert.ok(demoOpenPath.some((node, i) => node === demoFrom && demoOpenPath[i + 1] === demoTo));
+say({ presentation: demo, start: PLACES[demo.start], end: PLACES[demo.end], demoStart, demoGoal,
+  selectedSegments: demoSelection.segments.size, closedDirections: demoSelection.keys.size });
+
 const t = 1 / 1024;
 const exact = { lat: [10, 10 + t, 10 + t, 10 + 2 * t], lng: [122, 122 - t, 122 + t, 122], adj: [] };
 exact.adj = [[1, 2], [3], [3], []].map((list, start) =>
@@ -199,6 +216,7 @@ for (const goal of [plaza, kalibo, snap(locations['San Joaquin Church'])]) {
 }
 
 const cases = [
+  ['Presentation open', graph, demoStart, demoGoal], ['Presentation closure', closedDemo, demoStart, demoGoal],
   ['Urban campus', graph, plaza, campus], ['Airport open', graph, plaza, airport],
   ['Kalibo', graph, plaza, kalibo], ['One-way forward', graph, ...oneWay],
   ['One-way reverse', graph, oneWay[1], oneWay[0]], ['Guimaras disconnected', graph, plaza, jordan],
@@ -238,30 +256,43 @@ for (const [label, g, s, t] of cases) {
   }
 }
 
-for (const mode of modes) {
-  const open = reference(graph, plaza, airport, mode).cost;
-  const closed = reference(closedAirport, plaza, airport, mode).cost;
+const repairCases = [
+  ['Airport open → closed → reopened', plaza, airport, closedAirport, reroute],
+  ['Presentation open → closed → reopened', demoStart, demoGoal, closedDemo, demoClosures]
+];
+for (const [label, start, goal, closedGraph, closures] of repairCases) for (const mode of modes) {
+  const open = reference(graph, start, goal, mode).cost;
+  const closed = reference(closedGraph, start, goal, mode).cost;
   const records = Object.fromEntries(['initial', 'close', 'reopen', 'freshClosed', 'freshReopened'].map(key => [key, { samples: [] }]));
   function measure(pass, operation, g, expectation, make) {
     const result = timed(make);
-    validate(g, plaza, airport, result.path, mode, expectation);
+    const totals = validate(g, start, goal, result.path, mode, expectation);
     const row = records[operation];
-    if (pass === 0) row.events = result.events;
+    if (pass === 0) Object.assign(row, { events: result.events, totals });
     assert.equal(row.events, result.events);
     if (pass >= warmups) row.samples.push(result.ms);
   }
   for (let pass = 0; pass < warmups + repeats; pass++) {
     lpaReset();
-    measure(pass, 'initial', graph, open, () => ALGORITHMS.lpa.run(graph, plaza, airport, mode, []));
-    measure(pass, 'close', closedAirport, closed, () => lpaRepair(reroute));
+    measure(pass, 'initial', graph, open, () => ALGORITHMS.lpa.run(graph, start, goal, mode, []));
+    measure(pass, 'close', closedGraph, closed, () => lpaRepair(closures));
     measure(pass, 'reopen', graph, open, () => lpaRepair([]));
-    measure(pass, 'freshClosed', closedAirport, closed, () => lpaFresh(closedAirport, plaza, airport, mode));
-    measure(pass, 'freshReopened', graph, open, () => lpaFresh(graph, plaza, airport, mode));
+    measure(pass, 'freshClosed', closedGraph, closed, () => lpaFresh(closedGraph, start, goal, mode));
+    measure(pass, 'freshReopened', graph, open, () => lpaFresh(graph, start, goal, mode));
   }
   lpaReset();
   for (const row of Object.values(records)) {
     Object.assign(row, stats(row.samples));
     delete row.samples;
   }
-  say({ lpaRepair: 'Airport open → closed → reopened', mode, open, closed, operations: records });
+  say({ lpaRepair: label, mode, open, closed, operations: records });
 }
+
+const demand = CHOKEPOINTS.places.map(name => ({ name, i: nearestRoadVertex(graph, PLACES[name]).i }));
+const begin = performance.now();
+const analysis = await findChokepoints(graph, demand, {
+  candidates: CHOKEPOINTS.candidates, topK: CHOKEPOINTS.topK, penalty: CHOKEPOINTS.disconnectPenaltySec
+});
+const { name, key, used, total, rerouted, cut, avgExtra, score, coords } = analysis.chokepoints[0];
+say({ criticalRoad: { name, key, used, total, rerouted, cut, avgExtra, score, coords,
+  totalExtraSeconds: rerouted * avgExtra, candidates: analysis.examined, elapsedMs: performance.now() - begin } });

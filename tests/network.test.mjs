@@ -6,9 +6,10 @@ import { ALGORITHMS } from '../js/algorithms/index.js';
 import { lpaFresh, lpaInfo, lpaReady, lpaRepair, lpaReset } from '../js/algorithms/lpa-star.js';
 import { findChokepoints } from '../js/analysis/chokepoints.js';
 import { CHOKEPOINTS, DEFAULT_START, DEFAULT_END, MAP_CENTER, PLACES, ROADS_URL } from '../js/config.js';
-import { cityPlaceIndex, geocoderFor, geocodedMatches, mergeMatches } from '../js/features/geocoding.js';
+import { canSearchOnline, cityPlaceIndex, placeGeocoder, geocodedMatches, mergeMatches, placeWords } from '../js/features/geocoding.js';
 import { connectionMessage, noRouteMessage } from '../js/features/route-status.js';
 import { blockedEdges, removeClosedRoads } from '../js/graph/closure-filter.js';
+import { roadGeometry, selectRoads } from '../js/graph/closure-selection.js';
 import { buildGraph, decodeRoadGraph, loadGraph, nearestNode, nearestRoadVertex, reverseAdjacency, routeMetrics, snapRouteEndpoints, snapRoutePoint } from '../js/graph/road-graph.js';
 import { heuristic } from '../js/algorithms/common.js';
 import { hav } from '../js/utils/geo.js';
@@ -115,6 +116,71 @@ test('a drawn line closes both directions only when it crosses the road interior
   assert.deepEqual(ordered({ a: [0, .2], b: [0, .8] }), []);
 });
 
+test('freehand line finds transverse hits including a sampled crossing, with a narrow tip tolerance', () => {
+  const small = {
+    lat: [0, 0, .000016, .000016, -.001, .001],
+    lng: [-.001, .001, -.001, .001, .002, .002],
+    adj: [[[1]], [[0]], [[3]], [], [[5]], []]
+  };
+  const select = (points, options) => finish(selectRoads(small, points, options)).keys;
+  const stroke = [[-.0002, 0], [0, 0], [.00001, 0], [.00003, 0], [.00002, 0]];
+  assert.deepEqual(select(stroke), new Set([1, 6, 15]));
+  const almost = [[-.0002, 0], [-.000003, 0]];
+  assert.equal(select(almost).size, 0);
+  assert.deepEqual(select(almost, { pixel: [.000001, .000001] }), new Set([1, 6]));
+  assert.equal(select([[.000004, -.0007], [.000004, .0007]], { pixel: [.000001, .000001] }).size, 0);
+  assert.equal(select([[-.0002, -.001], [.0002, -.001]]).size, 0, 'road-endpoint touches leave the junction alone');
+  assert.equal(roadGeometry(small, select(stroke)).size, 2);
+});
+
+test('area includes interior, boundary, and long through-edges while preserving directed overlap', () => {
+  const small = {
+    lat: [0, 0, .001, .001, -.004, .004, .002, .002, .003, .004],
+    lng: [-.030, .030, -.001, .001, 0, 0, -.002, .002, .003, .004],
+    adj: [[[1]], [[0]], [[3]], [], [[5]], [], [[7]], [], [[9]], []]
+  };
+  const polygon = [[-.002, -.002], [-.002, .002], [.002, .002], [.002, -.002]];
+  const { keys, segments } = finish(selectRoads(small, polygon, { area: true }));
+  assert.deepEqual(keys, new Set([1, 10, 23, 45, 67]));
+  assert.deepEqual(finish(selectRoads(small, [...polygon].reverse(), { area: true })).keys, keys);
+  const subdivided = polygon.flatMap(([a, b], i) => {
+    const [c, d] = polygon[(i + 1) % polygon.length];
+    return Array.from({ length: 16 }, (_, j) => [a + (c - a) * j / 16, b + (d - b) * j / 16]);
+  });
+  assert.deepEqual(finish(selectRoads(small, subdivided, { area: true })).keys, keys);
+  assert.deepEqual(new Set(segments.keys()), new Set(roadGeometry(small, keys).keys()));
+  assert.equal(roadGeometry(small, keys).size, 4);
+  assert.ok(removeClosedRoads(small, [{ keys }]).adj[8].length);
+  const overlap = { keys: new Set([1]) };
+  assert.equal(removeClosedRoads(small, [overlap, { keys }]).adj[0].length, 0);
+  const reopened = removeClosedRoads(small, [overlap]);
+  assert.equal(reopened.adj[0].length, 0);
+  assert.equal(reopened.adj[1].length, 1);
+  assert.equal(small.adj[0].length, 1, 'selection never mutates base edges');
+});
+
+test('a tight area selects a long existing primary-road segment with both endpoints outside', () => {
+  const [u, v] = [8329, 8330];
+  const center = [(graph.lat[u] + graph.lat[v]) / 2, (graph.lng[u] + graph.lng[v]) / 2];
+  const [lat, lng] = center, d = .00005;
+  const ring = [[lat - d, lng - d], [lat - d, lng + d], [lat + d, lng + d], [lat + d, lng - d]];
+  assert.ok(Math.abs(graph.lat[u] - lat) > d && Math.abs(graph.lat[v] - lat) > d);
+  const { keys: selected, segments } = finish(selectRoads(graph, ring, { area: true }));
+  assert.ok(selected.has(u * graph.lat.length + v));
+  assert.ok(selected.has(v * graph.lat.length + u));
+  assert.equal(segments.size, 1);
+});
+
+test('area selection reaches the road dataset boundary and leaves an empty offshore selection empty', () => {
+  const east = graph.lng.reduce((right, lng, i) => lng > graph.lng[right] ? i : right, 0);
+  const lat = graph.lat[east], lng = graph.lng[east], d = .00008;
+  const ring = [[lat - d, lng - d], [lat - d, lng + d], [lat + d, lng + d], [lat + d, lng - d]];
+  const { segments } = finish(selectRoads(graph, ring, { area: true }));
+  assert.ok([...segments.values()].some(segment => segment.some(([a, b]) => a === lat && b === lng)));
+  const ocean = ring.map(([a, b]) => [a, b + .01]);
+  assert.equal(finish(selectRoads(graph, ocean, { area: true })).keys.size, 0);
+});
+
 test('the chord heuristic is consistent on an edge where the old approximation was not', () => {
   const [u, v] = [74447, 74448], { s: goal } = endpoints;
   const metres = graph.adj[u].find(edge => edge[0] === v)[1];
@@ -124,19 +190,17 @@ test('the chord heuristic is consistent on an edge where the old approximation w
   assert.ok(h(u) <= metres + h(v) + 1e-7);
 });
 
-test('both providers bias toward Iloilo without applying a bounding box or country restriction', () => {
-  const local = new URL(geocoderFor('127.0.0.1').url('Pavia & Iloilo'));
-  assert.equal(local.searchParams.get('text'), 'Pavia & Iloilo');
-  assert.equal(local.searchParams.get('sources'), 'openstreetmap');
-  assert.equal(local.searchParams.get('focus.point.lat'), String(MAP_CENTER[0]));
-  assert.equal(local.searchParams.get('focus.point.lon'), String(MAP_CENTER[1]));
-  assert.ok(![...local.searchParams.keys()].some(key => key.startsWith('boundary.')));
-  assert.equal(geocoderFor('localhost').name, 'Stadia Maps');
-  const hosted = new URL(geocoderFor('example.org').url('General Luna Avenue'));
-  assert.equal(hosted.hostname, 'photon.komoot.io');
-  assert.equal(hosted.searchParams.get('lat'), String(MAP_CENTER[0]));
-  assert.equal(hosted.searchParams.get('lon'), String(MAP_CENTER[1]));
-  assert.ok(!hosted.searchParams.has('bbox') && !hosted.searchParams.has('countrycode'));
+test('Photon uses an Iloilo bias without limiting worldwide results by country or extent', () => {
+  const url = new URL(placeGeocoder.url('上海'));
+  assert.equal(url.hostname, 'photon.komoot.io');
+  assert.equal(url.searchParams.get('q'), '上海');
+  assert.equal(url.searchParams.get('lat'), String(MAP_CENTER[0]));
+  assert.equal(url.searchParams.get('lon'), String(MAP_CENTER[1]));
+  assert.ok(!url.searchParams.has('bbox') && !url.searchParams.has('countrycode'));
+  assert.equal(canSearchOnline(placeWords('上海')), true);
+  assert.equal(canSearchOnline(placeWords('东')), false);
+  assert.equal(canSearchOnline(placeWords('  A B')), false);
+  assert.equal(placeWords('서울 ガ Máximo'), '서울 ガ maximo');
 });
 
 test('geocoder results include places abroad and still rank relevant places near modeled roads', () => {
@@ -164,6 +228,31 @@ test('geocoder results include places abroad and still rank relevant places near
   assert.deepEqual(mergeMatches('National Museum Iloilo', [], matches), []);
   const far = { ...universities[0], id: 'far', ll: [14.6, 121], nearRoad: false };
   assert.equal(mergeMatches('University of San Agustin', [], [far, universities[0]])[0].nearRoad, true);
+});
+
+test('translated results for native queries, city aliases, and identical names retain geographic context', () => {
+  const feature = (name, kind, country, coordinates, extra = {}) => ({
+    geometry: { type: 'Point', coordinates },
+    properties: { name, osm_key: 'place', osm_value: kind, country, ...extra }
+  });
+  const items = geocodedMatches([
+    feature('Shanghai', 'state', 'China', [121.4700152, 31.2312707]),
+    feature('Shanghai', 'station', 'China', [121.451, 31.252]),
+    feature('上海联想创新科技园', 'venue', 'China', [121.481, 31.23]),
+    feature('New York City Ballet', 'theatre', 'United States', [-73.984, 40.772]),
+    feature('New York', 'city', 'United States', [-74.001, 40.714], { state: 'New York' }),
+    feature('London', 'city', 'United Kingdom', [-0.128, 51.507]),
+    feature('London', 'city', 'Canada', [-81.25, 42.98])
+  ], graph);
+  const shanghai = mergeMatches('上海', [], items)[0];
+  assert.equal(shanghai.name, 'Shanghai');
+  assert.equal(shanghai.zoom, 8);
+  assert.match(shanghai.detail, /state.*China/);
+  assert.deepEqual(shanghai.ll, [31.2312707, 121.4700152]);
+  assert.equal(shanghai.roadIssue, 'outside');
+  assert.equal(mergeMatches('New York City', [], items)[0].name, 'New York');
+  assert.deepEqual(mergeMatches('London', [], items).map(place => place.detail), ['city · United Kingdom', 'city · Canada']);
+  assert.equal(mergeMatches('London Canada', [], items)[0].detail, 'city · Canada');
 });
 
 test('snapping rejects offshore and unsupported pins but still accepts long road segments and one-way sinks', () => {

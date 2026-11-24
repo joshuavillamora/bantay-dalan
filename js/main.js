@@ -9,9 +9,8 @@ import { initComparison } from './features/comparison.js';
 import { initWorkspace } from './ui/workspace.js';
 import { initWelcome } from './ui/welcome.js';
 import { setStatus } from './ui/dashboard.js';
-import { emit } from './events.js';
-import { loadGraph } from './graph/road-graph.js';
-import { showLocalRoads, showStudyArea } from './map/map.js';
+import { initRoutingRegion, selectDefaultRegion } from './features/routing-region.js';
+import { showStudyArea } from './map/map.js';
 import { $, setMessage } from './utils/dom.js';
 
 initWorkspace();
@@ -22,21 +21,25 @@ initPlaceSearch();
 initChokepoints();
 initRunController();
 initComparison();
+initRoutingRegion();
 initWelcome();
 setDefaultPoints();
+showStudyArea();
 
 async function initializeGraph() {
   $('graphRetry').hidden = true;
   setStatus('Loading road network…');
   setMessage();
   try {
-    const graph = await loadGraph();
-    showLocalRoads(graph);
-    showStudyArea();
-    emit('graph:ready', graph);
-  } catch {
+    const result = await selectDefaultRegion();
+    if (result.cancelled) {
+      setStatus('Road network loading cancelled');
+      $('graphRetry').hidden = false;
+    }
+  } catch (error) {
+    console.error('Could not load the default road graph', error);
     setStatus('Road network unavailable');
-    setMessage('Could not load the local road data. Start the project with a local web server, then retry.');
+    setMessage('Could not load the road data. Open the app on localhost or HTTPS, then retry.');
     $('graphRetry').hidden = false;
   }
 }

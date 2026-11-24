@@ -1,19 +1,36 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
-import { extname, join } from 'node:path';
+import { dirname, extname, join, resolve } from 'node:path';
+import { gunzipSync } from 'node:zlib';
+import { decodeRoadGraph } from '../js/graph/road-graph.js';
+import { roadSpatialIndex } from '../js/graph/road-spatial.js';
 
 const root = process.env.PERF_ROOT || process.cwd();
+const regionFile = process.env.PERF_REGION;
+const region = regionFile && JSON.parse(await readFile(regionFile, 'utf8'));
+const regionalRoads = region && resolve(dirname(regionFile), region.dataset);
+const regionalManifest = region && await (async () => {
+  const bytes = await readFile(regionalRoads);
+  const graph = decodeRoadGraph(JSON.parse(gunzipSync(bytes)));
+  return { id: 'benchmark', name: region.dataset, url: 'data/panay-roads.json.gz',
+    bounds: roadSpatialIndex(graph).bounds, vertices: graph.lat.length, edges: graph.edgeCount,
+    bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+})();
 const temp = await mkdtemp(join(tmpdir(), 'bantay-chrome-'));
-const types = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript', '.json':'application/json' };
+const types = { '.html':'text/html', '.css':'text/css', '.js':'text/javascript', '.json':'application/json', '.svg':'image/svg+xml' };
 const server = createServer(async (req,res) => {
   const path = new URL(req.url,'http://localhost').pathname;
-  const file = join(root,path==='/' ? 'index.html' : path);
+  const file = regionalRoads && path === '/data/panay-roads.json.gz' ? regionalRoads : join(root,path==='/' ? 'index.html' : path);
   try {
     let body = await readFile(file);
+    if (path === '/js/graph/region-manifest.js' && regionalManifest) {
+      body = `export const defaultRegion = ${JSON.stringify(regionalManifest)}; export const routingRegions = [defaultRegion];`;
+    }
     if(path==='/js/graph/road-graph.js'){
       body=body.toString().replace('const data = ROADS_URL.endsWith', "performance.mark('decode-start'); const data = ROADS_URL.endsWith")
         .replace('graph = decodeRoadGraph(data);', "performance.measure('decompress+parse','decode-start'); performance.mark('build-start'); graph = decodeRoadGraph(data); performance.measure('graph build','build-start');")
@@ -84,10 +101,10 @@ try {
     const {metrics}=await cdp('Performance.getMetrics');
     return +(metrics.find(m=>m.name==='JSHeapUsedSize').value/1048576).toFixed(1);
   };
-  const startup=await evaluate("(()=>{const r=performance.getEntriesByType('resource').find(e=>e.name.includes('panay-roads'));return {ms:performance.now(),bytes:r.encodedBodySize,download:r.duration,stages:performance.getEntriesByType('measure').map(e=>[e.name,e.duration]),longTasks:measurements.map(e=>e.duration),tileSource:document.querySelector('#mapSource').textContent,tileCount:performance.getEntriesByType('resource').filter(e=>e.name.includes('tile.openstreetmap')).length}})()");
-  console.log(JSON.stringify({mobile,startup,heap:await getHeap()}));
+  const startup=await evaluate("import('/js/graph/road-graph.js').then(async m=>{const r=performance.getEntriesByType('resource').find(e=>e.name.includes('panay-roads')), g=await m.loadGraph();return {ms:performance.now(),bytes:r.encodedBodySize,download:r.duration,stages:g.loadTimings||performance.getEntriesByType('measure').map(e=>[e.name,e.duration]),longTasks:measurements.map(e=>e.duration),tileSource:document.querySelector('#mapSource').textContent,tileCount:performance.getEntriesByType('resource').filter(e=>e.name.includes('tile.openstreetmap')).length}})");
+  console.log(JSON.stringify({region:region?.dataset || 'Panay and Guimaras',mobile,startup,heap:await getHeap()}));
   await evaluate("document.querySelector('#welcome').close()");
-  const selected="import('/js/state.js').then(({state})=>state.route!==null)";
+  const selected="import('/js/state.js').then(({state})=>!!state.route?.path)";
   const timed=async(name,action,predicate)=>{
     const start=await evaluate('performance.now()');
     const sync=await evaluate("(async()=>{const b=performance.now();await ("+action+");return performance.now()-b})()");
@@ -98,7 +115,17 @@ try {
   };
   const clickButton=id=>"document.querySelector('#"+id+"').click()";
   const dest=(ll,name)=>"import('/js/features/route-points.js').then(m=>m.setPoint('e',"+JSON.stringify(ll)+","+JSON.stringify(name)+"))";
-  const short=[10.699222,122.561824], long=[11.708529,122.366856];
+  const short=region?.short || [10.699222,122.561824], long=region?.long || [11.708529,122.366856];
+  if (region) {
+    // Configure only this benchmark session. The shipped graph and demand remain unchanged.
+    await evaluate(`Promise.all([import('/js/config.js'),import('/js/features/route-points.js'),import('/js/map/map.js')])
+      .then(([{PLACES,CHOKEPOINTS},{setPoint},{fitTrip}])=>{
+        const scenario=${JSON.stringify(region)};
+        setPoint('s',scenario.start,'Sample origin');
+        CHOKEPOINTS.places=scenario.demand.map((ll,i)=>{const name='Benchmark site '+(i+1);PLACES[name]=ll;return name;});
+        fitTrip([scenario.start,scenario.long]);
+      })`);
+  }
   for(const [ll,kind] of [[short,'urban'],[long,'long']]){
     await evaluate(dest(ll,kind));
     await timed(kind,clickButton('go'),selected);
@@ -107,7 +134,8 @@ try {
   console.log(JSON.stringify({afterRoutingHeap:await getHeap(),reverseBuffers}));
   const roads="import('/js/graph/road-graph.js')";
   const mapMod="import('/js/map/map.js')";
-  console.log(JSON.stringify({lookups:await evaluate(roads+".then(async m=>{const g=await m.loadGraph(),pts=Array.from({length:60},(_,i)=>[10.68+i*.001,122.55+i%7*.001]);return ['snapRoutePoint','nearestNode','nearestRoadVertex'].filter(k=>m[k]).map(k=>{const t=performance.now();for(const p of pts)m[k](g,p);return [k,(performance.now()-t)/pts.length]})})")}));
+  const point=region?.start || [10.68,122.55];
+  console.log(JSON.stringify({lookups:await evaluate(roads+`.then(async m=>{const g=await m.loadGraph(),[lat,lng]=${JSON.stringify(point)},pts=Array.from({length:60},(_,i)=>[lat+(i%10)*.0004,lng+i%7*.0004]);return ['snapRoutePoint','nearestNode','nearestRoadVertex'].filter(k=>m[k]).map(k=>{const t=performance.now();for(const p of pts)m[k](g,p);return [k,(performance.now()-t)/pts.length]})})`)}));
   await timed('pan-and-zoom',mapMod+".then(({map})=>{for(let i=0;i<8;i++)map.panBy([12,0],{animate:false});map.setZoom(map.getZoom()+1,{animate:false})})");
   await evaluate(dest(short,'Campus'));
   await evaluate("document.querySelector('#spd').value=100");
@@ -117,16 +145,57 @@ try {
   const lpaSelect=await evaluate("[...document.querySelectorAll('select')].find(e=>[...e.options].some(x=>x.value==='lpa'))?.id");
   assert.ok(lpaSelect);
   await evaluate("(()=>{const e=document.getElementById("+JSON.stringify(lpaSelect)+");e.value='lpa';e.dispatchEvent(new Event('change'));})()");
-  await evaluate(dest([10.8308758,122.4981721],'Airport'));
+  await evaluate(dest(region?.repair || [10.8308758,122.4981721],'Repair destination'));
   await timed('lpa-initial',clickButton('go'),selected);
   await timed('lpa-close',"Promise.all([import('/js/features/closures.js'),"+roads+",import('/js/state.js')]).then(async ([c,r,{state}])=>{const g=await r.loadGraph(), p=state.route.path,i=p.length>>1,a=p[i-1],b=p[i],n=g.lat.length;c.addLinkClosure(new Set([a*n+b,b*n+a]),'Probe closure');})",selected);
-  await timed('lpa-reopen',clickButton('closeClear'),selected);
+  if (region) {
+    const closureCheck = await evaluate(`Promise.all([
+      import('/js/features/closures.js'),${roads},import('/js/algorithms/dijkstra.js'),import('/js/state.js')
+    ]).then(([c,r,{dijkstra},{state}])=>{
+      const g=c.getRoutingGraph(), {s,t}=r.snapRouteEndpoints(g,state.start,state.end), {path,mode}=state.route;
+      const baseline=dijkstra(g,s,t,mode);
+      let step;while(!(step=baseline.next()).done){}
+      return {active:c.getClosures().length, seconds:r.routeMetrics(g,path).time, baseline:r.routeMetrics(g,step.value).time,
+        repaired:!document.querySelector('#repairBox').hidden};
+    })`);
+    assert.equal(closureCheck.active, 1);
+    assert.equal(closureCheck.repaired, true);
+    assert.ok(Math.abs(closureCheck.seconds - closureCheck.baseline) < 1e-6);
+    console.log(JSON.stringify({ closureCheck }));
+  }
+  await timed('lpa-reopen',`(()=>{${clickButton('closeClear')};${clickButton('closeClearApply')};})()`,selected);
   await timed('comparison',clickButton('compareBtn'),"document.querySelectorAll('#res tbody tr').length===4");
+  assert.ok(await evaluate("document.querySelector('#comparisonStatus').classList.contains('comparison-success') && document.querySelectorAll('#res tbody tr').length === 4"));
+  if (region) {
+    const comparison = await evaluate(`Promise.all([
+      import('/js/graph/road-graph.js'),import('/js/features/closures.js'),
+      import('/js/algorithms/index.js'),import('/js/algorithms/lpa-star.js'),import('/js/state.js')
+    ]).then(([r,c,{ALGORITHMS},{lpaFresh},{state}])=>{
+      const g=c.getRoutingGraph(), {s,t}=r.snapRouteEndpoints(g,state.start,state.end);
+      const rows={};
+      for(const mode of ['short','fast']){
+        rows[mode]={};
+        for(const name of Object.keys(ALGORITHMS)){
+          const it=(name==='lpa'?lpaFresh:ALGORITHMS[name].run)(g,s,t,mode);
+          const start=performance.now();let step,expanded=0;while(!(step=it.next()).done)expanded++;
+          const ms=performance.now()-start, path=step.value;
+          if(!path || path[0]!==s || path.at(-1)!==t)throw Error('Invalid sample route');
+          rows[mode][name]={...r.routeMetrics(g,path),ms,expanded};
+        }
+      }
+      return {nodes:g.lat.length,edges:g.adj.reduce((sum,list)=>sum+list.length,0),rows};
+    })`);
+    for (const [mode, rows] of Object.entries(comparison.rows)) {
+      const metric = mode === 'short' ? 'dist' : 'time';
+      for (const row of Object.values(rows)) assert.ok(Math.abs(row[metric] - rows.dijkstra[metric]) < 1e-6);
+    }
+    console.log(JSON.stringify({comparison}));
+  }
   await timed('chokepoint',clickButton('chokeBtn'),"document.querySelector('#chokeList').children.length>0&&!document.querySelector('#chokeBtn').disabled");
   await timed('chokepoint-repeat',clickButton('chokeBtn'),"document.querySelector('#chokeList').children.length>0&&!document.querySelector('#chokeBtn').disabled");
   const first='National Museum', remote='Duenas Municipal Hall';
   const fixture={features:[{geometry:{type:'Point',coordinates:[122.617462,11.064464]},properties:{name:remote,city:'Duenas',state:'Iloilo'}}]};
-  await evaluate("(()=>{const real=fetch;window.onlineRequests=[];window.fetch=(url,opts)=>{if(!String(url).includes('geocoding/'))return real(url,opts);onlineRequests.push(performance.now());return new Promise(resolve=>setTimeout(()=>resolve(Response.json("+JSON.stringify(fixture)+")),120))}})()");
+  await evaluate("(()=>{const real=fetch;window.onlineRequests=[];window.fetch=(url,opts)=>{if(!String(url).startsWith('https://photon.komoot.io/'))return real(url,opts);onlineRequests.push(performance.now());return new Promise(resolve=>setTimeout(()=>resolve(Response.json("+JSON.stringify(fixture)+")),120))}})()");
   await evaluate("document.querySelector('[data-mode=route]').click()");
   const localMs = await evaluate("(()=>{const e=document.querySelector('#to');e.focus();const t=performance.now();e.value="+JSON.stringify(first)+";e.dispatchEvent(new Event('input'));return performance.now()-t})()");
   console.log(JSON.stringify({localSearch:{ms:localMs,immediate:(await read()).places}}));
@@ -135,9 +204,9 @@ try {
   if (process.env.PERF_SMOKE === '1') {
     const click = id => evaluate(clickButton(id));
     const input = query => evaluate("(()=>{const e=document.querySelector('#to');e.focus();e.value="+JSON.stringify(query)+";e.dispatchEvent(new Event('input'));})()");
-    await evaluate("window.fetch=(previous=>function(url, options) {return String(url).includes('geocoding/') ? Promise.resolve(new Response('',{status:503})) : previous(url,options)})(fetch)");
+    await evaluate("window.fetch=(previous=>function(url, options) {return String(url).startsWith('https://photon.komoot.io/') ? Promise.resolve(new Response('',{status:503})) : previous(url,options)})(fetch)");
     await input('National Museum of the Philippines Iloilo');
-    await until(read, s=>s.places[0]?.includes('National Museum of the Philippines') && s.status.startsWith('Online place search is unavailable'), 'offline suggestions');
+    await until(read, s=>s.places[0]?.includes('National Museum of the Philippines') && s.status.startsWith('Online place search is temporarily unavailable'), 'offline suggestions');
     if (mobile) {
       await cdp('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
       const [x,y]=await evaluate("(()=>{const e=document.querySelector('#toOpt0');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return [Math.round(r.x+r.width/2),Math.round(r.y+r.height/2)];})()");
@@ -174,11 +243,16 @@ try {
     await click('chokeBtn');
     await until(()=>evaluate("document.querySelector('.choke-pin')!==null"),Boolean,'CHOKEPOINT highlight');
     await evaluate("document.querySelector('[data-mode=disrupt]').click()");
+    await evaluate(mapMod+".then(({map})=>{map.setView([10.701,122.5609],17,{animate:false});})");
     await click('closeDraw');
+    await click('closePoints');
     await evaluate(mapMod+".then(({map})=>{map.fire('click',{latlng:L.latLng(10.701,122.5609)});map.fire('click',{latlng:L.latLng(10.7005,122.5611)});})");
+    await until(()=>evaluate("!document.querySelector('#closeReview').hidden"),Boolean,'closure review');
+    await click('closeApply');
     assert.ok(await evaluate("document.querySelector('#closureList').children.length")>0);
     assert.match(await evaluate("document.querySelector('#chokeHint').textContent"),/Closures changed/);
     await click('closeClear');
+    await click('closeClearApply');
     console.log(JSON.stringify({smoke:'offline lookup, selection, playback, CHOKEPOINT highlight/invalidation, drawn closure and reopening passed',mobile}));
     if (!mobile) {
       const statuses={};

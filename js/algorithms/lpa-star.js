@@ -31,6 +31,7 @@ function createSearch(g, s, t, mode, closures) {
   st.update = v => {   // UpdateVertex; returns true if v just became reachable
     let fresh = false;
     if (v !== s) { const best = bestPred(v)[0]; if (st.rhs[v] === Infinity && best < Infinity) fresh = true; st.rhs[v] = best; }
+    // A new stamp invalidates older heap entries for this vertex.
     st.stamp[v]++; st.inQ[v] = 0;
     if (st.G[v] !== st.rhs[v]) { st.inQ[v] = 1; st.heap.push(v, k1(v), k2(v), st.stamp[v]); }
     return fresh;
@@ -86,6 +87,7 @@ function startSearch(g, s, t, mode, closures) {
 /* closures changed: update only the affected nodes, return a generator that repairs the route */
 export function lpaRepair(closures) {
   const st = saved, n = st.n, now = blockedEdges(st.g, closures), touched = new Set();
+  // Only the destination of a changed directed edge needs an immediate rhs update.
   for (const k of st.blocked) if (!now.has(k)) touched.add(k % n);   // road reopened
   for (const k of now) if (!st.blocked.has(k)) touched.add(k % n);   // road newly closed
   st.blocked = now; touched.forEach(v => st.update(v));

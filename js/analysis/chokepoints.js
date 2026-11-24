@@ -1,5 +1,5 @@
 /* Chokepoint finder (pure logic, no DOM).
-   1. Route every pair of demand points (popular places) on the open road network.
+   1. Route the sampled pairs on the supplied graph, including any active closures.
    2. Split the routes into road links (stretches between intersections) and count how many trips use each link.
    3. Close each heavily used link in turn, re-route the trips that used it, and measure the damage:
         score = extra travel seconds over all affected trips + penalty for every trip that becomes impossible.

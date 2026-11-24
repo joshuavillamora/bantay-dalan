@@ -1,5 +1,7 @@
 # Panay and Guimaras road data
 
+This is the preserved startup dataset. See the [regional coverage report](regional-coverage.md) for the on-demand assets and their extraction, verification, and geographic scope.
+
 `panay-roads.json.gz` is a local, gzip-compressed `bantay-roads-v1` snapshot derived from © OpenStreetMap contributors. The snapshot is available under the [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/1-0/). [OpenStreetMap attribution](https://www.openstreetmap.org/copyright)
 
 ## Source and reproduction
@@ -37,4 +39,4 @@ Use the same audit and benchmark commands with the Iloilo candidate or original 
 - Intersections use shared OSM node IDs. Bridge and tunnel geometry retains its original topology, even where ways cross in the map. The selected Panay snapshot had zero missing node references in retained ways. Duplicate directed pairs share one edge with the faster modeled travel cost. Edge distance uses the existing local distance calculation, with a 1 cm floor for distinct nodes at the same coordinates. Travel time uses the existing fixed class speeds, with 15 km/h for service roads and tracks.
 - Ferries, pedestrian paths, and cycleways are outside the car model. The snapshot does not implement posted turn-restriction relations, live closures, or posted-speed routing. The extractor counted 124 restriction relations touching included ways. Access tags may be incomplete or outdated. Geometric proximity alone cannot verify whether a person or vehicle can reach a road from a selected pin.
 
-Public Overpass is useful for targeted inspections. One bulk Geofabrik download and offline filtering produced both candidates and avoids repeated public API traffic. Wider regions can use the same extraction approach offline. A nationwide browser graph was neither built nor benchmarked. [Overpass public-use guidance](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html)
+Public Overpass is useful for targeted inspections. One bulk Geofabrik download and offline filtering supplied the Panay candidates and the later Philippine regional assets. Runtime loads the prepared graph assets from the app’s own host. [Overpass public-use guidance](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html)

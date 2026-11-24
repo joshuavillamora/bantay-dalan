@@ -11,6 +11,7 @@ export async function runInSlices(iterator, { stride = 64, keepGoing = () => tru
   let result, count = 0, ms = 0, start = performance.now();
   while (!(result = iterator.next()).done) {
     if (++count % stride || performance.now() - start < budget) continue;
+    // Exclude time spent waiting for the browser to process input and paint.
     ms += performance.now() - start;
     await nextTask();
     if (!keepGoing()) return;

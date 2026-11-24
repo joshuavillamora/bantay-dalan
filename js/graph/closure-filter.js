@@ -1,12 +1,12 @@
-/* Applies road closures (lines drawn on the map) to a graph. A road is closed when it crosses a closure line. */
+/* Filter directed edges selected by active closures. Accept legacy two-point lines as well as explicit edge keys. */
 import { crosses } from '../utils/geo.js';
 import { visitRoadSegments } from './road-spatial.js';
 
-/* a new graph with the closed roads removed (the original is not modified) */
 export function removeClosedRoads(g, closures) {
   if (!closures.length) return g;
   const closed = blockedEdges(g, closures), n = g.lat.length;
   if (!closed.size) return g;
+  // Reuse untouched adjacency rows and leave the base graph available for repair and reopening.
   const adj = g.adj.slice();
   const touched = new Set(Array.from(closed, key => Math.floor(key / n)));
   for (const u of touched) adj[u] = g.adj[u].filter(([v]) => !closed.has(u * n + v));

@@ -10,6 +10,7 @@ export function* bestFirst(g, s, t, mode, useHeuristic = false, workspace) {
   const { cost, prev, done } = workspace || bestFirstWorkspace(g.lat.length);
   const touched = workspace?.touched;
   if (touched) {
+    // Analysis reuses these arrays across trips. Only nodes reached by the previous search need resetting.
     for (const v of touched) { cost[v] = Infinity; prev[v] = -1; done[v] = 0; }
     touched.length = 0;
     touched.push(s);
@@ -18,6 +19,7 @@ export function* bestFirst(g, s, t, mode, useHeuristic = false, workspace) {
   cost[s] = 0; heap.push(s, 0);
   while (heap.size) {
     const u = heap.pop();
+    // A cheaper entry may already have settled this node since this entry was queued.
     if (done[u]) continue;
     done[u] = 1;
     const found = [];

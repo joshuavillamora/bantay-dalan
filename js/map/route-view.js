@@ -3,6 +3,16 @@ import { map, reducedMotion, setLegend, tooltipText } from './map.js';
 
 let head, pathLine, pathCase, previous, pathRaf;
 
+function styleRoutes() {
+  const zoom = map.getZoom();
+  const photo = map.getContainer().classList.contains('photo-basemap');
+  const width = zoom < 12 ? 4 : zoom >= 17 ? 6 : 5;
+  pathLine?.setStyle({ weight: width });
+  pathCase?.setStyle({ weight: width + (photo ? 5 : 4) });
+  previous?.setStyle({ weight: width, opacity: photo ? .84 : .7 });
+}
+map.on('zoomend basemapchange', styleRoutes);
+
 export function showHead(g, i) {
   hideHead();
   head = L.marker([g.lat[i], g.lng[i]], {
@@ -27,6 +37,7 @@ export function showPreviousRoute(points) {
   previous = points?.length > 1 ? L.polyline(points, {
     pane: 'previousRoute', className: 'analysis-outline', color: '#626b75', weight: 5, dashArray: '8 7', interactive: false
   }).addTo(map) : null;
+  styleRoutes();
   setLegend('previous', !!previous);
 }
 
@@ -36,6 +47,7 @@ function drawRoute(points) {
   pathLine = L.polyline(points, { color: '#1e4ba8', weight: 5, bubblingMouseEvents: false })
     .bindTooltip(tooltipText('Current route'), { sticky: true });
   pathLine.addTo(map);
+  styleRoutes();
   setLegend('route', points.length > 1);
 }
 

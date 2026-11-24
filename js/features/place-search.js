@@ -4,10 +4,12 @@ import { map } from '../map/map.js';
 import { on } from '../events.js';
 import { $ } from '../utils/dom.js';
 import { esc } from '../utils/format.js';
-import { PLACES } from '../config.js';
+import { OFFLINE_PRESENTATION, PLACES } from '../config.js';
 import { setPoint } from './route-points.js';
-import { cityPlaceIndex, geocoderFor, geocodedMatches, mergeMatches, placeWords } from './geocoding.js';
+import { canSearchOnline, cityPlaceIndex, placeGeocoder, geocodedMatches, mergeMatches, placeWords } from './geocoding.js';
 import { connectionMessage } from './route-status.js';
+import { regionsForPoint } from './routing-region.js';
+import { regionalPlaceIndexes } from './offline-places.js';
 
 const suggested = [
   { name: 'Plaza Libertad', id: 'way/49424474', detail: 'City Proper, Iloilo City', aliases: ['Plaza Alfonso XII'] },
@@ -20,7 +22,7 @@ const suggested = [
 const savedPlaces = Object.entries(PLACES).map(([name, ll]) =>
   suggested.find(place => place.name === name) || { name, ll, detail: 'Saved place' });
 const noResults = 'No matching place found. Try another name or select a point on the map.';
-const unavailable = 'Online place search is unavailable. Try a local or saved place, or select a location on the map.';
+const unavailable = 'Online place search is temporarily unavailable. Try a local or saved place, or select a location on the map.';
 const retryDelay = 30000;
 
 function attach(input, which, session) {
@@ -42,7 +44,9 @@ function attach(input, which, session) {
 
   function render(message = '', showHeading = false) {
     const rows = items.map((place, index) => {
-      const note = [place.detail, place.roadIssue && connectionMessage(place.roadIssue)].filter(Boolean).join(' · ');
+      const candidate = place.roadIssue && regionsForPoint(place.ll).find(region => region !== session.graph?.region);
+      const roadNote = candidate ? candidate.name + ' road network available' : place.roadIssue && connectionMessage(place.roadIssue);
+      const note = [place.detail, place.local && 'Local index', roadNote].filter(Boolean).join(' · ');
       return `<li class="opt" role="option" id="${input.id}Opt${index}" data-index="${index}">
         <strong>${esc(place.name)}</strong>${note ? `<small>${esc(note)}</small>` : ''}
       </li>`;
@@ -82,12 +86,20 @@ function attach(input, which, session) {
     const key = placeWords(query);
     if (!query) { showSuggested(); return; }
     const nearby = session.local?.(query) || [];
-    const localPlaces = [...savedPlaces, ...nearby];
+    const center = map.getCenter().wrap();
+    const regional = session.regional(query, [center.lat, center.lng], session.graph?.region);
+    const localPlaces = [...savedPlaces, ...nearby, ...regional.items];
     items = mergeMatches(query, localPlaces);
     const hasLocalMatch = items.length > 0;
     active = -1;
 
-    if (key.length < 3) { render('Type at least 3 characters to search online.'); return; }
+    if (OFFLINE_PRESENTATION || !navigator.onLine) {
+      const detail = regional.loading ? 'Loading local place indexes…' : hasLocalMatch ? 'Showing offline results.'
+        : 'No matching local place found. Try a nearby city or choose a point on the map.';
+      render(detail);
+      return;
+    }
+    if (!canSearchOnline(key)) { render('Keep typing to search online.'); return; }
     const apply = features => {
       const selected = items[active];
       const matches = geocodedMatches(features, session.graph);
@@ -108,7 +120,7 @@ function attach(input, which, session) {
       const timeout = setTimeout(() => controller.abort(), 6000);
       session.nextRequest = Date.now() + 1000;
       try {
-        const response = await fetch(session.provider.url(query), {
+        const response = await fetch(placeGeocoder.url(query), {
           signal: controller.signal, credentials: 'omit'
         });
         if (id !== revision) return;
@@ -137,7 +149,8 @@ function attach(input, which, session) {
     if (!place) return;
     setPoint(which, place.ll, place.name);
     dismiss();
-    if (!map.getBounds().contains(place.ll)) map.panTo(place.ll, { animate: false });
+    const zoom = !place.zoom || place.nearRoad ? Math.max(14, map.getZoom()) : place.zoom;
+    map.setView(place.ll, zoom, { animate: false });
   }
 
   input.addEventListener('focus', () => {
@@ -183,11 +196,11 @@ function attach(input, which, session) {
 }
 
 export function initPlaceSearch() {
-  const provider = geocoderFor(location.hostname);
-  $('searchProvider').textContent = provider.name;
-  $('searchProvider').href = provider.credit;
-  const session = { provider, graph: null, cache: new Map(), nextRequest: 0, retryAfter: 0 };
+  $('searchProvider').textContent = placeGeocoder.name;
+  $('searchProvider').href = placeGeocoder.credit;
+  const session = { graph: null, cache: new Map(), nextRequest: 0, retryAfter: 0 };
   const fields = [attach($('from'), 's', session), attach($('to'), 'e', session)];
+  session.regional = regionalPlaceIndexes(() => fields.forEach(field => field.refresh()));
   async function loadCityPlaces() {
     try {
       const response = await fetch('data/iloilo-places.json');
@@ -204,4 +217,9 @@ export function initPlaceSearch() {
   on('workspace:changed', mode => {
     if (mode !== 'route') for (const field of fields) field.dismiss();
   });
+  window.addEventListener('online', () => {
+    session.retryAfter = 0;
+    fields.forEach(field => field.refresh());
+  });
+  window.addEventListener('offline', () => fields.forEach(field => field.refresh()));
 }

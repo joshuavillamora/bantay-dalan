@@ -18,19 +18,20 @@ export const DEFAULT_END = "SM City Iloilo";
 
 export const MAP_CENTER = [10.7050, 122.5600];
 export const MAP_ZOOM = 13;
+export const OFFLINE_PRESENTATION = new URLSearchParams(globalThis.location?.search || '').get('offline') === '1';
 export const CARTO_API_KEY = "";                 // optional public CARTO basemap key
 export const ROADS_URL = 'data/panay-roads.json.gz';
 export const PHOTON_URL = 'https://photon.komoot.io/api/';
 export const ROUTE_SNAP_LIMIT_METRES = 1500;
 export const ROUTE_ROAD_PROXIMITY_METRES = 250;
 
+// These fixed class speeds model estimated travel time in both routing and analysis.
 export const SPEED = {motorway:80,trunk:60,primary:50,secondary:40,tertiary:35,unclassified:30,residential:25,living_street:15,
   motorway_link:40,trunk_link:35,primary_link:30,secondary_link:30,tertiary_link:30,service:15,track:15};   // km/h
 export const DEFAULT_ROAD_SPEED = 25;
 export const MAX_SPEED_MS = Math.max(DEFAULT_ROAD_SPEED, ...Object.values(SPEED)) / 3.6;
 
-/* Chokepoint finder: trips between these places represent how the community moves around.
-   (The airport is left out: it is in Cabatuan, outside the city, and would make the highway to it look critical.) */
+// These Iloilo landmarks define the presentation sample. Other regions provide their own sample points.
 export const CHOKEPOINTS = {
   places: [DEFAULT_START,"Fort San Pedro / Ferry Terminal","Robinsons Place Iloilo","Molo Church","Jaro Cathedral",
            "Iloilo Esplanade","SM City Iloilo","Smallville Complex","Iloilo Convention Center"],

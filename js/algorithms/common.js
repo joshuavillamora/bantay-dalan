@@ -8,7 +8,7 @@ import { MAX_SPEED_MS } from '../config.js';
 
 export { edgeCost } from '../graph/road-graph.js';
 
-/* straight-line estimate from node v to the goal, in the same unit as edgeCost */
+// Dividing the chord distance by the maximum modeled speed gives a lower bound in seconds.
 export const heuristic = (g, goal, mode) => v =>
   chordDistance(g.lat[v], g.lng[v], g.lat[goal], g.lng[goal]) / (mode === 'fast' ? MAX_SPEED_MS : 1);
 
