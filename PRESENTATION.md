@@ -4,7 +4,7 @@
 
 ## Rehearse before presenting
 
-From the CHOKEPOINT checkout, double-click `Start CHOKEPOINT.command` or run `python3 scripts/serve.py --port 8000`. Open [the offline presentation](http://127.0.0.1:8000/?offline=1) in a fresh Chrome tab. Wait for **Ready to route** and **Offline Panay and Guimaras streets**. Verify that **Road network** is set to **Panay and Guimaras**, **Estimated fastest** is selected, and there are **0 active closures**. Use the saved **Plaza Libertad** and **SM City Iloilo** suggestions or the default pins.
+From the CHOKEPOINT checkout, double-click `Start CHOKEPOINT.command` or run `python3 scripts/serve.py --port 8000`. Open [the offline presentation](http://127.0.0.1:8000/?offline=1&network=panay-guimaras) in a fresh Chrome tab. Wait for **Ready to route** and **Offline Panay and Guimaras streets**. Verify that **Road network** is set to **Panay and Guimaras**, **Estimated fastest** is selected, and there are **0 active closures**. Use the saved **Plaza Libertad** and **SM City Iloilo** suggestions or the default pins. If port 8000 is occupied, specify a free port and use the same port in the URL. The normal launch selects Iloilo City. Keep Panay and Guimaras selected for this experiment.
 
 In **Route**, keep **Estimated fastest** selected. **Plaza Libertad** is at `10.69264, 122.57367`, snapped to routing vertex **431709**. **SM City Iloilo** is at `10.71417, 122.55106`, snapped to vertex **3719**. All runs use the bundled Panay and Guimaras graph from the November 22, 2026 OSM snapshot. Its gzip SHA-256 is `67b5a94e45ce0b115335073c6f359c03874793fd67e73b5e5115c68f2f055a04`.
 
@@ -12,13 +12,13 @@ In **Route**, keep **Estimated fastest** selected. **Plaza Libertad** is at `10.
 
 | Time | Clicks and expected result |
 | --- | --- |
-| 0:00–0:20 | Show **Plaza Libertad → SM City Iloilo**. Click **Find route**. The blue route is **5.356 km**, **6.61 min estimated**. The Route card rounds these to **5.4 km** and **7 min**. |
+| 0:00–0:20 | Show **Plaza Libertad → SM City Iloilo**. Click **Find route**. The blue route is **5.356 km**, **6.61 min estimated**. The Route summary shows **5.36 km** and **6.61 min**, using the same precision as Compare and Route impact. |
 | 0:20–0:50 | Open **Compare**, select **Bidirectional Dijkstra**, and click **Visualize search**. Move **Speed** to its maximum. Show the two frontiers. Select **A\*** and click **Visualize search** to show its goal-directed expansion. Click **Run comparison** and point out the search events, compute time, and the Dijkstra verification above the table. |
 | 0:50–1:25 | Select **LPA\*** and click **Visualize search**. Let it finish before changing the graph. In **Disrupt**, zoom to the closure location below. Click **Draw closure → Line**, click the header logo, draw the crossing, and click **Apply closure** when the preview says **Close 1 road segment?**. The blue detour uses **Donato Pison Avenue / Pison Avenue**. The **Route impact** table shows **5.75 km**, **9.53 min estimated**. |
 | 1:25–1:45 | Return to **Compare**. Show **LPA* incremental repair** and **6,180 search events**. Click **Run comparison** again and show the **11,524** fresh events, **46.4%** event reduction, and Dijkstra verification in the repair section. |
 | 1:45–2:00 | In **Disrupt**, click **Undo last closure** and let the original route return. Open **Analyze → Find critical roads** and point to **General Luna Avenue**. If time is tight, use the verified example on the slide. |
 
-The scripted Chrome rehearsals from Bidirectional visualization through LPA* initialization, closure, fresh comparison, undo, and Analyze took **2.24–2.30 s** after the page was ready. Applying, repairing, and rendering the detour took **0.42–0.45 s**, and Analyze took **0.57–0.59 s**. The two-minute schedule budgets time for manual navigation, drawing, and narration. Those parts were outside the automated timing.
+The earlier scripted Chrome rehearsals from Bidirectional visualization through LPA* initialization, closure, fresh comparison, undo, and Analyze took **2.24–2.30 s** after the page was ready. Applying, repairing, and rendering the detour took **0.42–0.45 s**, and Analyze took **0.57–0.59 s**. The two-minute schedule budgets time for manual navigation, drawing, and narration. Those parts were outside the automated timing.
 
 ### Exact closure
 

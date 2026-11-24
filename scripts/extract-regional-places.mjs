@@ -1,5 +1,5 @@
 /* Build local locality and regional indexes from a type-sorted OSM PBF. */
-import { createReadStream, mkdirSync, writeFileSync } from 'node:fs';
+import { createReadStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
@@ -9,13 +9,26 @@ import { gzipSync } from 'node:zlib';
 import { routingRegions } from '../js/graph/region-manifest.js';
 import { placeWords } from '../js/features/geocoding.js';
 import { createSourceNodeIndex } from './osm-node-index.mjs';
+import { boundaryContains, boundsContain as contains, prepareBoundary } from './administrative-geometry.mjs';
+import { administrativeGroups } from '../data/regions/administrative.js';
 
-const [file, parserPrefix, output, country = 'philippines'] = process.argv.slice(2);
+const [file, parserPrefix, output, country = 'philippines', boundaries, ...ids] = process.argv.slice(2);
 if (!output || !['philippines', 'singapore'].includes(country)) throw Error('Pass a source PBF, parser prefix, output directory and country');
 const require = createRequire(resolve(parserPrefix, 'package.json'));
 const parser = require('osm-pbf-parser');
 const singapore = country === 'singapore';
-const regions = routingRegions.filter(region => region.id.startsWith('singapore') === singapore)
+const names = new Map(administrativeGroups.flatMap(([, entries]) => entries));
+const scopes = new Set(ids);
+const targetAreas = boundaries ? JSON.parse(readFileSync(boundaries)).features.flatMap(({ properties, geometry }) => {
+  const id = properties.scope ?? 'ph-' + properties.adm1_psgc;
+  if (!scopes.has(id)) return [];
+  return [{ id, name: names.get(id), ...prepareBoundary(geometry), entries: new Map() }];
+}) : null;
+if (boundaries && (singapore || !scopes.size || targetAreas.length !== scopes.size ||
+    targetAreas.some(region => !region.name))) throw Error('Pass Philippine boundary data and declared regional IDs');
+// Iloilo's index follows municipal polygons and is produced with the Iloilo graph.
+const regions = targetAreas || routingRegions.filter(region => !region.coverageUrl && region.id !== 'iloilo-city-province' &&
+  region.id.startsWith('singapore') === singapore)
   .map(region => ({ ...region, entries: new Map() }));
 const major = new Map();
 const hash = createHash('sha256');
@@ -64,7 +77,6 @@ function category(tags) {
 
 const coordinateScale = 1e6;
 const sourceNodes = createSourceNodeIndex(coordinateScale);
-const contains = ([west, south, east, north], lat, lon) => lat >= south && lat <= north && lon >= west && lon <= east;
 
 // Use a mapped point nearest the mean so a winding way's label stays on the feature.
 function representative(points) {
@@ -92,8 +104,11 @@ function record(row, name, placement, [kind, priority]) {
   function add(list) {
     if ((list.get(key)?.priority || 0) < priority) list.set(key, item);
   }
-  for (const region of regions) if (contains(region.bounds, lat / coordinateScale, lon / coordinateScale)) add(region.entries);
-  if (!singapore && nationalKinds.has(kind)) add(major);
+  const y = lat / coordinateScale, x = lon / coordinateScale;
+  for (const region of regions) {
+    if (contains(region.bounds, y, x) && (!region.polygons || boundaryContains(region.polygons, y, x))) add(region.entries);
+  }
+  if (!singapore && !targetAreas && nationalKinds.has(kind)) add(major);
 }
 
 let seenWay = false;
@@ -119,9 +134,10 @@ await pipeline(createReadStream(file), track, new parser.BlobParser(), new parse
 
 const pbfSha256 = hash.digest('hex');
 sourceNodes.clear();
-const expectedSource = regions.find(region => region.source)?.source;
+const expectedSource = (targetAreas ? routingRegions : regions).find(region =>
+  region.source && region.id.startsWith('singapore') === singapore)?.source;
 if (pbfSha256 !== expectedSource) throw Error('Source PBF does not match the routing snapshot');
-if (!singapore) regions.push({ id: 'philippines-localities', name: 'Philippines', entries: major });
+if (!singapore && !targetAreas) regions.push({ id: 'philippines-localities', name: 'Philippines', entries: major });
 mkdirSync(output, { recursive: true });
 for (const { id, name, entries } of regions) {
   const kinds = [];

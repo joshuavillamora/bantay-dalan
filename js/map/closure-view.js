@@ -41,7 +41,7 @@ export function showClosedRoads(closures, reopen) {
     let line = lines.get(closure.id);
     if (line) line.setLatLngs(roads);
     else {
-      line = L.polyline(roads, { ...style, color: '#d7263d', weight: 3.5, interactive, bubblingMouseEvents: false })
+      line = L.polyline(roads, { ...style, color: '#d7263d', weight: 3.5, dashArray: '9 2', interactive, bubblingMouseEvents: false })
         .bindTooltip(tooltipText(`Closure #${closure.id} · click to reopen`), { sticky: true })
         .on('click', () => { if (interactive) reopen(closure); }).addTo(map);
       lines.set(closure.id, line);

@@ -1,6 +1,6 @@
 import { state } from '../state.js';
 import { $ } from '../utils/dom.js';
-import { fmtD, fmtT } from '../utils/format.js';
+import { fmtClosureCount, fmtD, fmtRouteDistance, fmtRouteTime } from '../utils/format.js';
 
 export function refreshControls() {
   $('queueCount').hidden = !state.run?.visual;
@@ -21,12 +21,13 @@ export function setCounts(expanded, queued = 0) {
 export const costName = mode => mode === 'fast' ? 'Estimated fastest' : 'Shortest distance';
 
 export function renderRoute(route, note) {
+  $('tripName').hidden = $('routeTotals').hidden = !route?.path;
   $('tripName').textContent = `${state.names.s} → ${state.names.e}`;
-  $('sD').textContent = route?.path ? fmtD(route.dist) : '—';
-  $('sT').textContent = route?.path ? fmtT(route.time) : '—';
+  $('sD').textContent = route?.path ? fmtRouteDistance(route.dist) : '—';
+  $('sT').textContent = route?.path ? fmtRouteTime(route.time) : '—';
   $('routeDetail').textContent = route
-    ? route.failure || `Route available · ${costName(route.mode)} · ${route.name}`
-    : note || 'Travel estimates use fixed road speeds.';
+    ? route.failure || `${route.name} · ${costName(route.mode)} · ${fmtClosureCount(route.closures.length)}. Travel time uses modeled road speeds.`
+    : note || 'Both endpoints are selected. Find a route to continue.';
 }
 
 const scenarioLabel = closures => closures.length ? `closures ${closures.map(c => '#' + c.id).join(', ')}` : 'no closures';
@@ -57,11 +58,11 @@ export function renderImpact(current, original, closures, pending = false) {
     }
   }
   const cells = route => route?.path
-    ? `<td>${fmtD(route.dist, 2)}</td><td>${(route.time / 60).toFixed(2)} min</td>`
+    ? `<td>${fmtRouteDistance(route.dist)}</td><td>${fmtRouteTime(route.time)}</td>`
     : `<td colspan="2">${route ? 'Unreachable' : pending === true ? 'Updating…' : 'Unavailable'}</td>`;
   $('routeImpact').textContent = summary;
   details.innerHTML = `<table>
-    <thead><tr><th scope="col">Scenario</th><th scope="col">Distance</th><th scope="col">Est. travel</th></tr></thead>
+    <thead><tr><th scope="col">Scenario</th><th scope="col">Route distance</th><th scope="col">Estimated travel time</th></tr></thead>
     <tbody><tr><th scope="row">Original<small>Reference · ${scenarioLabel(original.closures)}</small></th>${cells(original)}</tr>
     <tr><th scope="row">Current<small>${scenarioLabel(closures)}</small></th>${cells(current)}</tr></tbody>
   </table><p class="hint">${costName(original.mode)} · same endpoints and fixed road speeds</p>`;

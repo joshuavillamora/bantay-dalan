@@ -1,6 +1,33 @@
 # Panay and Guimaras road data
 
-This is the preserved startup dataset. See the [regional coverage report](regional-coverage.md) for the on-demand assets and their extraction, verification, and geographic scope.
+The original Panay and Guimaras graph remains the presentation dataset. Iloilo City is the default. See the [regional coverage report](regional-coverage.md) for earlier on-demand extracts and the [administrative audit](master-audit.md) for the full-region candidates.
+
+## Priority study areas
+
+| Network | Scope | Vertices | Directed edges | Compressed graph |
+| --- | --- | ---: | ---: | ---: |
+| Iloilo City | City of Iloilo | 27,204 | 55,055 | 0.38 MiB |
+| Iloilo Province | Passi City and 42 municipalities, including mapped offshore roads | 213,114 | 433,828 | 2.68 MiB |
+| Iloilo City and Province | City of Iloilo and all 43 provincial LGUs | 240,324 | 488,978 | 3.07 MiB |
+| Panay Island | Main island across Aklan, Antique, Capiz and Iloilo, including Iloilo City | 459,609 | 936,373 | 5.84 MiB |
+
+All four were verified with both objectives, all four algorithms, directed reconstruction, closure and reopening, and LPA* repair. City-to-municipality travel was checked on the combined graph. Panay verification includes Iloilo City to Kalibo, Roxas City and San Jose de Buenavista. Separate island components are preserved where the road data provides no connection. The local place indexes and Panay offline tiles work across these study areas. Provincial outlines follow the source municipal polygons and can show internal boundaries. [PSA Iloilo roster](https://psa.gov.ph/classification/psgc/citimuni/0603000000) · [Boundary sources](regions/coverage/README.md)
+
+To regenerate the two new graphs, use the archived PBF, DPWH municipal GeoJSON, matching 2026-Q3 regional boundary GeoJSON and pinned `osm-pbf-parser@2.3.0` described below and in the [administrative audit](master-audit.md#reproduction-and-launch). Set `pbf`, `municipalities`, `regions` and `parser_dir` to their local paths.
+
+```sh
+run="$(mktemp -d)"
+mkdir -p "$run/roads" "$run/places" "$run/proofs"
+node scripts/prepare-priority-boundaries.mjs "$municipalities" "$regions" "$run/study-areas.geojson"
+node --max-old-space-size=4096 scripts/extract-region-samples.mjs "$pbf" "$parser_dir" "$run/roads" --administrative "$run/study-areas.geojson"
+node scripts/extract-regional-places.mjs "$pbf" "$parser_dir" "$run/places" philippines "$run/study-areas.geojson" iloilo-province panay-island
+for id in iloilo-province panay-island; do
+  node --expose-gc scripts/verify-region.mjs "$run/roads/$id.json.gz" scripts/administrative-fixtures.json > "$run/proofs/$id.json"
+done
+node scripts/build-administrative-catalog.mjs "$run/roads" "$run/places" "$run/proofs" "$run/study-areas.geojson" "$run/staged" iloilo-province panay-island
+```
+
+The staged catalog contains only the requested entries. Integrate those rows and assets alongside the other verified networks.
 
 `panay-roads.json.gz` is a local, gzip-compressed `bantay-roads-v1` snapshot derived from © OpenStreetMap contributors. The snapshot is available under the [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/1-0/). [OpenStreetMap attribution](https://www.openstreetmap.org/copyright)
 
@@ -40,3 +67,19 @@ Use the same audit and benchmark commands with the Iloilo candidate or original 
 - Ferries, pedestrian paths, and cycleways are outside the car model. The snapshot does not implement posted turn-restriction relations, live closures, or posted-speed routing. The extractor counted 124 restriction relations touching included ways. Access tags may be incomplete or outdated. Geometric proximity alone cannot verify whether a person or vehicle can reach a road from a selected pin.
 
 Public Overpass is useful for targeted inspections. One bulk Geofabrik download and offline filtering supplied the Panay candidates and the later Philippine regional assets. Runtime loads the prepared graph assets from the app’s own host. [Overpass public-use guidance](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html)
+
+## Iloilo City and Province
+
+The dedicated study graph is generated from the same Philippine PBF and DPWH boundary snapshot listed above. It includes Iloilo City (DPWH code `063022000`) and the 43 provincial governments at the city or municipal level, including Passi City. It follows the union of the 44 polygons, including their component islands. The extent is 10.4677995–11.6378375° N and 122.0195687–123.3584859° E. The original Panay and Guimaras graph remains the default and is still used by the presentation fixture.
+
+The extraction uses consecutive OSM road vertices inside the union. It splits a retained way at excluded vertices and blocked barriers. A segment whose endpoints are inside can still cross a narrow boundary sliver. Paths that leave and re-enter the province can require the wider Panay graph. Stable OSM node and way IDs, directionality, shared junctions, and class-speed weights are preserved. The same-snapshot place index filters the prepared Panay place records to the study extent and municipal polygons.
+
+With the matching inputs and parser installed as above, regenerate both gzip assets in a temporary output directory:
+
+```sh
+node --max-old-space-size=4096 scripts/extract-roads.mjs "$work/philippines.osm.pbf" "$work/municipalities.geojson" "$work" "$work" --iloilo data/places/panay-guimaras.json.gz
+node scripts/audit-coverage.mjs "$work/municipalities.geojson" "$work/iloilo-city-province.json.gz"
+node --expose-gc scripts/verify-region.mjs "$work/iloilo-city-province.json.gz" scripts/iloilo-region-fixture.json
+```
+
+Use `iloilo-city-province.json.gz` in `data/regions/` and install `iloilo-city-province-places.json.gz` as `data/places/iloilo-city-province.json.gz`. Validate the graph against the regional fixture and refresh the two manifests if the input snapshot changes. [Current checksum, limits, and results](final-redesign.md)

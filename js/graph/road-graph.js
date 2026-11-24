@@ -1,7 +1,7 @@
 /* Decode a road dataset into a directed adjacency list.
    Graph shape: { lat[], lng[], adj[][], ways[] } where adj[u] = [[v, metres, km/h, wayIndex], ...] (directed edges)
    and ways[wayIndex] is the road's name. */
-import { ROADS_URL, SPEED, DEFAULT_ROAD_SPEED, ROUTE_SNAP_LIMIT_METRES, ROUTE_ROAD_PROXIMITY_METRES } from '../config.js';
+import { ROADS_URL, SPEED, DEFAULT_ROAD_SPEED, PLACE_ROAD_ACCESS, ROUTE_SNAP_LIMIT_METRES, ROUTE_ROAD_PROXIMITY_METRES } from '../config.js';
 import { hav } from '../utils/geo.js';
 import { prepareRoadSpatialIndex, roadSpatialIndex, visitRoadSegments } from './road-spatial.js';
 import { finishWork, runInSlices } from '../utils/work-slices.js';
@@ -208,6 +208,17 @@ export function nearestRoadVertex(g, point, base = g) {
 export function snapRoutePoint(g, point) {
   const noRoad = { i: -1, d: Infinity, reason: 'noRoad' };
   if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) return noRoad;
+  const access = PLACE_ROAD_ACCESS.find(({ location }) => point.every((value, i) => Math.abs(value - location[i]) < 1e-7));
+  if (access) {
+    const snap = closestRoadPoint(g, access.road, noRoad);
+    if (snap.i >= 0 && snap.d < .5) {
+      return { i: snap.i, d: hav(...point, g.lat[snap.i], g.lng[snap.i]), access: access.name };
+    }
+  }
+  return closestRoadPoint(g, point, noRoad);
+}
+
+function closestRoadPoint(g, point, noRoad) {
   const [lat, lng] = point;
   const scale = Math.cos(lat * Math.PI / 180);
   const latMargin = ROUTE_ROAD_PROXIMITY_METRES / 110000, lngMargin = latMargin / scale;

@@ -1,0 +1,23 @@
+{
+  "iloilo-city": {"name":"Iloilo City","start":[10.713611,122.5624994],"short":[10.69264,122.57367],"long":[10.6967,122.5444]},
+  "iloilo-province": {"name":"Iloilo Province","start":[10.774806,122.541929],"short":[10.827228,122.531475],"long":[11.456092,123.1511]},
+  "panay-island": {"name":"Panay Island","start":[10.69264,122.57367],"short":[10.71417,122.55106],"long":[11.708529,122.366856],"viaCapiz":[11.586,122.752],"viaAntique":[10.745,121.941]},
+  "ph-1300000000": {"name":"NCR — National Capital Region","start":[14.5903076,120.9804886],"short":[14.5542995,121.0080508],"long":[14.633483,121.041081]},
+  "ph-1400000000": {"name":"CAR — Cordillera Administrative Region","start":[16.412,120.596],"short":[16.406,120.595],"long":[16.454,120.592]},
+  "ph-100000000": {"name":"Region I — Ilocos Region","start":[17.574,120.387],"short":[17.557,120.388],"long":[18.193,120.593]},
+  "ph-200000000": {"name":"Region II — Cagayan Valley","start":[17.613,121.727],"short":[17.62,121.728],"long":[18.355,121.636]},
+  "ph-300000000": {"name":"Region III — Central Luzon","start":[15.037,120.689],"short":[15.037,120.7],"long":[15.486,120.968]},
+  "ph-400000000": {"name":"Region IV-A — CALABARZON","start":[14.17,121.24],"short":[14.165,121.243],"long":[13.939,121.617]},
+  "ph-1700000000": {"name":"MIMAROPA Region","start":[13.414,121.18],"short":[13.408,121.176],"long":[12.356,121.068],"disconnected":[9.74,118.735],"islandDestination":[11.179,119.392]},
+  "ph-500000000": {"name":"Region V — Bicol Region","start":[13.621,123.19],"short":[13.627,123.187],"long":[13.139,123.733]},
+  "ph-600000000": {"name":"Region VI — Western Visayas","start":[10.69264,122.57367],"short":[10.71417,122.55106],"long":[11.708529,122.366856],"disconnected":[10.665884,122.590546]},
+  "ph-1800000000": {"name":"NIR — Negros Island Region","start":[10.675,122.952],"short":[10.665,122.95],"long":[9.31,123.307],"disconnected":[9.216,123.514],"islandDestination":[9.161,123.491]},
+  "ph-700000000": {"name":"Region VII — Central Visayas","start":[10.2936781,123.9012416],"short":[10.2850578,123.9003056],"long":[11.049,124.002],"disconnected":[9.645,123.856],"islandDestination":[9.847,124.327]},
+  "ph-800000000": {"name":"Region VIII — Eastern Visayas","start":[11.243,125.004],"short":[11.235,125.002],"long":[11.774,124.886],"bridge":[11.31,124.981]},
+  "ph-900000000": {"name":"Region IX — Zamboanga Peninsula","start":[6.905,122.077],"short":[6.909,122.074],"long":[7.795,122.582]},
+  "ph-1000000000": {"name":"Region X — Northern Mindanao","start":[8.48,124.647],"short":[8.471,124.647],"long":[8.50048,124.6269]},
+  "ph-1100000000": {"name":"Region XI — Davao Region","start":[7.0648707,125.6078132],"short":[7.0795221,125.6099131],"long":[7.449,125.807]},
+  "ph-1200000000": {"name":"Region XII — SOCCSKSARGEN","start":[6.115,125.172],"short":[6.122,125.171],"long":[6.497,124.851]},
+  "ph-1600000000": {"name":"Region XIII — Caraga","start":[8.95,125.539],"short":[8.942,125.534],"long":[8.989,125.352]},
+  "ph-1900000000": {"name":"BARMM — Bangsamoro Autonomous Region in Muslim Mindanao","start":[7.216,124.248],"short":[7.199,124.245],"long":[7.112,124.321]}
+}

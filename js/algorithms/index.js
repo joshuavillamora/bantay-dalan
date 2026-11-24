@@ -1,4 +1,4 @@
-/* The baseline participates in comparisons and stays out of the primary selector. */
+/* Three evaluated searches and one independently verified reference search. */
 import { astar } from './astar.js';
 import { dijkstra } from './dijkstra.js';
 import { bidirectional } from './bidirectional.js';

@@ -1,3 +1,4 @@
 # Locally prepared vector basemaps. The portable package includes these archives.
 /assets/maps/*.pmtiles
 __pycache__/
+.DS_Store

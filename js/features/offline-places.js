@@ -1,6 +1,7 @@
 import { routingRegions } from '../graph/region-manifest.js';
 import { pointInRegion } from '../graph/regions.js';
 import { cityPlaceIndex, placeWords } from './geocoding.js';
+import { regionLabel } from '../ui/region-labels.js';
 
 export function regionalPlaceIndexes(onLoaded) {
   const cache = new Map(), pending = new Map(), retry = new Map();
@@ -12,15 +13,16 @@ export function regionalPlaceIndexes(onLoaded) {
       const index = cache.get(id);
       cache.delete(id);
       cache.set(id, index);
-      return;
+      return index;
     }
     const job = (async () => {
       try {
-        const url = new URL('../../data/places/' + id + '.json.gz', import.meta.url);
+        const region = routingRegions.find(region => region.id === id);
+        const url = new URL('../../' + (region?.placeUrl || `data/places/${id}.json.gz`), import.meta.url);
         const response = await fetch(url);
         if (!response.ok) throw Error('Local index unavailable');
         const data = await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
-        cache.set(id, await cityPlaceIndex(data));
+        cache.set(id, await cityPlaceIndex(region ? { ...data, city: regionLabel(region) } : data));
         const regionalIds = [...cache.keys()].filter(key => key !== national);
         if (regionalIds.length > 2) cache.delete(regionalIds[0]);
       } catch {
@@ -38,9 +40,9 @@ export function regionalPlaceIndexes(onLoaded) {
     return size(a) - size(b);
   });
 
-  return (query, point, active) => {
+  function lookup(query, point, active) {
     const typed = placeWords(query);
-    const named = typed.length >= 4 && byArea.find(region => placeWords(region.name).split(' ').includes(typed));
+    const named = typed.length >= 4 && byArea.find(region => placeWords(regionLabel(region)).split(' ').includes(typed));
     const region = named || (active && pointInRegion(active, point) ? active : byArea.find(item => pointInRegion(item, point)));
     const id = region?.id;
     if (typed.length >= 2) { load(national); load(id); }
@@ -48,5 +50,10 @@ export function regionalPlaceIndexes(onLoaded) {
       items: [...(cache.get(id)?.(query) || []), ...(cache.get(national)?.(query) || [])],
       loading: pending.has(id) || pending.has(national)
     };
+  }
+  lookup.landmarks = region => {
+    if (!region) return [];
+    return load(region.id)?.landmarks || [];
   };
+  return lookup;
 }

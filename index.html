@@ -5,23 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CHOKEPOINT · Road Network Analysis &amp; Resilience</title>
 <meta name="application-name" content="CHOKEPOINT">
-<meta name="description" content="CHOKEPOINT compares routing algorithms, simulates road closures, and analyzes critical links in Iloilo's modeled road network.">
-<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-<link rel="alternate icon" type="image/png" href="assets/favicon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<meta name="description" content="CHOKEPOINT compares routing algorithms, simulates closures, and analyzes critical road links in modeled Philippine road networks.">
+<link rel="icon" href="assets/branding/symbol/favicon.ico">
+<link rel="apple-touch-icon" href="assets/branding/symbol/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/vendor/leaflet/dist/leaflet.css">
+<link rel="stylesheet" href="css/fonts.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <header class="app-header">
   <div class="brand">
-    <img class="logo" src="assets/chokepoint-symbol.svg" alt="" width="42" height="42">
-    <div><h1><img class="wordmark" src="assets/chokepoint-wordmark.svg" alt="CHOKEPOINT"></h1><p>Road Network Analysis &amp; Resilience</p></div>
+    <button id="closureLogo" class="logo-tool" type="button" aria-label="Pick up the CHOKEPOINT closure tool" disabled>
+      <img class="logo" width="68" height="68" src="assets/branding/symbol/chokepoint-app-icon.png" alt="" draggable="false">
+    </button>
+    <div class="brand-copy"><h1><img class="brand-wordmark" width="602" height="140" src="assets/branding/wordmark/chokepoint-wordmark-header.svg" alt="CHOKEPOINT"></h1><p>Road Network Analysis &amp; Resilience</p></div>
   </div>
   <div class="header-actions">
-    <button id="panelToggle" type="button" class="quiet" aria-expanded="true" aria-controls="panel">Hide panel</button>
     <button id="help" type="button" class="secondary">Help</button>
   </div>
 </header>
@@ -29,27 +28,26 @@
 <div class="workspace" id="workspace">
   <nav class="mode-rail" aria-label="Workbench modes">
     <button type="button" data-mode="route" aria-current="true" aria-controls="routePanel">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="17" r="2"/><circle cx="19" cy="7" r="2"/><path d="M7 17h8a3 3 0 0 0 0-6H9a2 2 0 0 1 0-4h8"/></svg>Route
+      <img src="assets/icons/display/route.png" alt="" width="56" height="56">Route
     </button>
     <button type="button" data-mode="disrupt" aria-controls="disruptPanel">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v11m14-11v11M3 7h18v8H3zm4 8 6-8m0 8 6-8"/></svg>Disrupt
+      <img src="assets/icons/display/disrupt.png" alt="" width="56" height="56">Disrupt
     </button>
     <button type="button" data-mode="analyze" aria-controls="analyzePanel">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4m-12-9h6m-3-3v6"/></svg>Analyze
+      <img src="assets/icons/display/analyze.png" alt="" width="56" height="56">Analyze
     </button>
     <button type="button" data-mode="compare" aria-controls="comparePanel">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5v14h16M8 15v-4m5 4V7m5 8v-6"/></svg>Compare
+      <img src="assets/icons/display/compare.png" alt="" width="56" height="56">Compare
     </button>
   </nav>
 
   <aside id="panel" aria-label="Workbench controls">
     <section class="mode-panel" id="routePanel" aria-labelledby="route-title">
+      <header class="panel-heading"><h2 id="route-title">ROUTE PLANNER</h2></header>
       <div class="panel-body">
-        <h2 id="route-title">Plan a route</h2>
-        <p class="intro">Search for a landmark, street, or mapped address. Choose a result to set the endpoint.</p>
         <div class="trip">
           <div class="leg">
-            <label for="from"><span class="point-label start" aria-hidden="true">A</span> Start</label>
+            <label for="from"><img class="point-label" src="assets/icons/display/point-a.png" alt="A"> Start</label>
             <div class="search">
               <input id="from" type="text" placeholder="Find a starting point" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="fromList" aria-describedby="fromAccess">
               <div id="fromSuggest" class="suggest" hidden>
@@ -57,14 +55,14 @@
                 <ul id="fromList" role="listbox" aria-label="Start suggestions" hidden></ul>
                 <p id="fromSearchStatus" class="search-status" role="status"></p>
               </div>
-              <p id="fromAccess" class="hint endpoint-access" role="status" hidden></p>
+              <div id="fromAccess" class="hint endpoint-access" hidden></div>
             </div>
           </div>
           <button id="swap" class="secondary swap" type="button" aria-label="Swap start and destination" title="Swap endpoints">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v16m-4-4 4 4 4-4M16 20V4m-4 4 4-4 4 4"/></svg>
           </button>
           <div class="leg">
-            <label for="to"><span class="point-label end" aria-hidden="true">B</span> Destination</label>
+            <label for="to"><img class="point-label" src="assets/icons/display/point-b.png" alt="B"> Destination</label>
             <div class="search">
               <input id="to" type="text" placeholder="Find a destination" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="toList" aria-describedby="toAccess">
               <div id="toSuggest" class="suggest" hidden>
@@ -72,7 +70,7 @@
                 <ul id="toList" role="listbox" aria-label="Destination suggestions" hidden></ul>
                 <p id="toSearchStatus" class="search-status" role="status"></p>
               </div>
-              <p id="toAccess" class="hint endpoint-access" role="status" hidden></p>
+              <div id="toAccess" class="hint endpoint-access" hidden></div>
             </div>
           </div>
         </div>
@@ -81,33 +79,61 @@
           <button id="pickEnd" type="button" class="secondary" aria-pressed="false">Pick B</button>
           <button id="gps" type="button" class="quiet">Use my location</button>
         </div>
-        <p class="search-credit">Online search by <a id="searchProvider" href="https://photon.komoot.io/" target="_blank" rel="noopener noreferrer">Photon</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a></p>
         <div class="field">
-          <h3>Optimize for</h3>
-          <div class="seg" role="group" aria-label="Optimize for">
+          <label class="field-label" id="regionLabel" for="routingRegion">Road network</label>
+          <button id="regionPicker" class="secondary region-picker" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="regionDialog" aria-describedby="networkSwitchHint" hidden></button>
+          <select id="routingRegion" aria-describedby="networkSwitchHint" disabled></select>
+          <p class="hint contextual-hint" id="networkSwitchHint">Switching networks clears current closures and results.</p>
+          <details class="network-coverage hint">
+            <summary>Network coverage</summary>
+            <p id="networkCoverage"></p>
+          </details>
+        </div>
+        <div class="field">
+          <span class="field-label" id="objectiveLabel">Routing objective</span>
+          <div class="seg" role="group" aria-labelledby="objectiveLabel">
             <button id="mFast" type="button" aria-pressed="true">Estimated fastest</button>
             <button id="mShort" type="button" aria-pressed="false">Shortest distance</button>
           </div>
         </div>
         <section id="live" class="inset" aria-labelledby="current-title">
           <h3 id="current-title">Current route</h3>
-          <p id="tripName" class="hint">Choose endpoints to begin.</p>
-          <dl class="metrics">
+          <p id="tripName" class="hint" hidden></p>
+          <dl class="metrics route-totals" id="routeTotals" hidden>
             <div><dt>Route distance</dt><dd id="sD">—</dd></div>
             <div><dt>Estimated travel time</dt><dd id="sT">—</dd></div>
           </dl>
-          <p id="routeDetail" class="hint">Travel estimates use fixed road speeds.</p>
+          <button id="tripRegionOffer" type="button" class="secondary network-offer" hidden></button>
+          <p id="routeDetail" class="hint">Choose a start and destination to find a route.</p>
         </section>
       </div>
       <div class="panel-actions"><button id="go" class="primary" type="button" disabled>Find route</button></div>
     </section>
 
     <section class="mode-panel" id="disruptPanel" aria-labelledby="disrupt-title" hidden>
+      <header class="panel-heading"><h2 id="disrupt-title">ROAD CLOSURES</h2></header>
       <div class="panel-body">
-        <h2 id="disrupt-title">Simulate a closure</h2>
-        <p class="intro">Draw across a road to remove the intersected segments from routing.</p>
+        <p class="intro">Draw across roads or outline an area. Review the selection before applying it.</p>
+        <button id="closeDraw" class="primary panel-task" type="button" aria-pressed="false" disabled>Draw closure</button>
         <p id="closeHint" class="feedback" role="status" hidden></p>
-        <div class="split-heading"><h3 id="closureCount">Active closures (0)</h3><button id="closeClear" class="quiet" type="button" disabled>Clear all</button></div>
+        <div id="closureSetup" hidden>
+          <div class="seg" role="group" aria-label="Closure shape">
+            <button id="closeLine" type="button" aria-pressed="true">Line</button>
+            <button id="closeArea" type="button" aria-pressed="false">Area</button>
+          </div>
+          <div class="tools">
+            <button id="closeStart" class="secondary" type="button">Use drawing tool</button>
+            <button id="closePoints" class="quiet" type="button">Two-point line</button>
+          </div>
+        </div>
+        <div class="split-heading inset"><h3 id="closureCount">Active closures (0)</h3><button id="closeClear" class="quiet" type="button" disabled>Clear all</button></div>
+        <div id="closeClearPrompt" class="closure-confirm" hidden>
+          <p>Reopen all closed roads?</p>
+          <div class="closure-actions">
+            <button id="closeClearApply" class="secondary" type="button">Reopen all</button>
+            <button id="closeClearCancel" class="quiet" type="button">Cancel</button>
+          </div>
+        </div>
         <p id="closureEmpty" class="hint">All modeled roads are open.</p>
         <ol id="closureList" class="closure-list"></ol>
         <button id="closeUndo" class="secondary" type="button" hidden>Undo last closure</button>
@@ -117,89 +143,137 @@
           <div id="impactDetails" hidden></div>
         </section>
       </div>
-      <div class="panel-actions"><button id="closeDraw" class="primary" type="button" aria-pressed="false" disabled>Draw closure</button></div>
+      <div class="panel-actions closure-review-actions">
+        <div id="closeReview" class="closure-confirm" hidden>
+          <p id="closeQuestion" role="status"></p>
+          <div class="closure-actions">
+            <button id="closeApply" class="primary" type="button">Apply closure</button>
+            <button id="closeCancel" class="secondary" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="mode-panel" id="analyzePanel" aria-labelledby="analyze-title" hidden>
+      <header class="panel-heading"><h2 id="analyze-title">CRITICAL ROADS</h2></header>
       <div class="panel-body">
-        <h2 id="analyze-title">CHOKEPOINT</h2>
-        <p class="intro">Rank tested road links by their impact on sampled trips between Iloilo landmarks.</p>
-        <p id="chokeHint" class="feedback" role="status">Analysis uses the current simulated closures.</p>
+        <p id="analysisScope" class="intro">Rank tested road links by their impact on sampled trips between Iloilo landmarks.</p>
+        <div class="analysis-actions">
+          <button id="chokeBtn" class="primary" type="button" disabled>Find critical roads</button>
+          <button id="chokeCancel" class="secondary" type="button" hidden>Cancel</button>
+        </div>
+        <dl id="analysisMetrics" class="metrics analysis-metrics" hidden>
+          <div><dt>Links tested</dt><dd id="linksTested"></dd></div>
+          <div><dt>Sampled trips</dt><dd id="sampledTrips"></dd></div>
+          <div><dt>Active closures</dt><dd id="analysisClosures"></dd></div>
+        </dl>
+        <p id="chokeHint" class="hint" role="status"></p>
         <ol id="chokeList" class="choke-list"></ol>
         <button id="chokeClear" class="quiet" type="button" hidden>Hide highlights</button>
         <details class="method">
-          <summary>How the score works</summary>
+          <summary>How scoring works</summary>
           <p>For each tested link, the model adds the extra estimated travel time across affected trips and a 30-minute penalty for each trip that becomes unreachable. The candidates are the most-used links on the sampled routes.</p>
-          <p>Trip sampling uses one direction per pair of configured landmarks. The rankings apply to this sample and the closures in effect when it ran.</p>
+          <p>Trip sampling uses one direction per pair. A four-point sample gives up to six trips. The rankings reflect the configured sample and the closures in effect when the analysis ran.</p>
         </details>
-      </div>
-      <div class="panel-actions analysis-actions">
-        <button id="chokeBtn" class="primary" type="button" disabled>Find critical roads</button>
-        <button id="chokeCancel" class="secondary" type="button" hidden>Cancel</button>
       </div>
     </section>
 
     <section class="mode-panel" id="comparePanel" aria-labelledby="compare-title" hidden>
+      <header class="panel-heading"><h2 id="compare-title">COMPARE ALGORITHMS</h2></header>
       <div class="panel-body">
-        <h2 id="compare-title">Compare algorithms</h2>
-        <p class="intro">Watch the search for your current trip, then compare fresh runs under the same conditions.</p>
-        <label class="field-label" for="algo">Search algorithm</label>
-        <select id="algo" aria-describedby="info"></select>
+        <label class="field-label" for="algo">Search visualization</label>
+        <div class="visualization-controls">
+          <select id="algo" aria-describedby="info"></select>
+          <button id="visualize" class="secondary" type="button" disabled>Visualize search</button>
+        </div>
         <p class="hint" id="info"></p>
-        <div class="tools"><button id="visualize" class="secondary" type="button" disabled>Visualize search</button></div>
         <section class="inset" aria-labelledby="comparison-title">
-          <h3 id="comparison-title">Fresh search results</h3>
-          <p id="comparisonStatus" class="hint" role="status">Run a comparison to check route costs and count processed search events.</p>
+          <h3 id="comparison-title">Comparison results</h3>
+          <p id="comparisonContext" class="hint"></p>
+          <p id="comparisonStatus" class="hint" role="status">Compare three routing algorithms against the Standard Dijkstra baseline.</p>
           <div id="resBox" hidden>
-            <div id="res" class="table-wrap" role="region" aria-label="Fresh algorithm comparison" tabindex="0"></div>
-            <p class="hint">One run per algorithm. Compute time excludes animation and shared graph preparation. Runtime varies by device.</p>
+            <section id="sharedTotals" class="shared-totals" aria-labelledby="shared-totals-title" hidden>
+              <h4 id="shared-totals-title">Route summary</h4>
+              <dl class="metrics">
+                <div><dt>Route distance</dt><dd id="sharedDistance"></dd></div>
+                <div><dt>Estimated travel time</dt><dd id="sharedTime"></dd></div>
+              </dl>
+            </section>
+            <div id="res" class="table-wrap" role="region" aria-label="Algorithm comparison" tabindex="0"></div>
+            <p id="comparisonEffort" class="hint comparison-effort"></p>
+            <details id="comparisonDeltas" class="method" hidden>
+              <summary>Search events relative to the baseline</summary>
+              <ul id="comparisonDeltaList"></ul>
+            </details>
           </div>
         </section>
         <section id="repairBox" class="inset" aria-labelledby="repair-title" hidden>
           <h3 id="repair-title">LPA* incremental repair</h3>
           <p id="repairResult" class="hint"></p>
+          <p id="repairComparison" class="repair-comparison" hidden></p>
         </section>
+        <details class="method" id="benchmarkMethod" hidden>
+          <summary>About measurements</summary>
+          <p>Each algorithm starts with newly initialized search state on the same endpoints, graph, closures, and routing objective. Compute time excludes shared graph preparation, animation, and drawing. These are single-run browser measurements. Repeated benchmark medians are documented separately.</p>
+          <p>Search events can include repeated processing of a vertex. Optimized costs are checked against Standard Dijkstra for the selected objective. Routes and secondary totals may differ even when optimized costs agree. LPA* incremental repair reuses search state and is evaluated separately from full recalculation.</p>
+        </details>
       </div>
       <div class="panel-actions"><button id="compareBtn" class="primary" type="button" disabled>Run comparison</button></div>
     </section>
   </aside>
 
-  <main class="map-workspace" aria-label="Iloilo road map workspace">
+  <main class="map-workspace" aria-label="Map workspace">
     <div class="map-stage">
-      <div id="map" role="region" aria-label="Map of Iloilo City" aria-describedby="mapKeys"></div>
+      <div id="map" role="region" aria-label="World map" aria-describedby="mapKeys"></div>
       <p id="mapKeys" class="sr">Use arrow keys to pan and plus or minus to zoom.</p>
       <div class="map-tools">
         <div class="map-caption">
-          <div><p class="map-place">Iloilo City, PH</p><p id="mapSource" role="status">Loading streets…</p></div>
           <label class="sr" for="mapStyle">Map style</label>
           <select id="mapStyle" aria-describedby="mapSource">
             <option value="streets">Streets</option>
+            <option value="offline">Offline map</option>
             <option value="satellite">Satellite</option>
             <option value="hybrid">Hybrid</option>
+            <option value="network">Network view</option>
           </select>
-          <button id="studyArea" type="button" class="map-button" aria-label="Center on study area" title="Center on study area">
+          <button id="studyArea" type="button" class="map-button" aria-label="Return to the active region" title="Return to the active region">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
           </button>
+          <button id="wheelMode" type="button" class="map-button" aria-label="Zoom with the scroll wheel" aria-pressed="false" title="Scroll pans the map. Hold Ctrl while scrolling to zoom.">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="5"/><path d="M12 7v3"/></svg>
+          </button>
+          <p id="mapSource" role="status">Loading streets…</p>
         </div>
+        <details class="network-controls" id="networkLayers" hidden>
+          <summary>Network layers</summary>
+          <div class="network-options">
+            <label><input type="checkbox" data-layer="edges" checked> Road edges</label>
+            <label><input type="checkbox" data-layer="vertices" aria-describedby="networkZoom"> Vertices</label>
+            <label><input type="checkbox" data-layer="directions" aria-describedby="networkZoom"> Travel directions</label>
+            <label><input type="checkbox" data-layer="search" checked> Search activity</label>
+            <label><input type="checkbox" data-layer="closures" checked> Road closures</label>
+            <label><input type="checkbox" data-layer="critical" checked> Critical roads</label>
+            <p class="hint" id="networkZoom"></p>
+          </div>
+        </details>
         <p id="mapHint" class="map-hint" role="status" hidden></p>
       </div>
     </div>
     <details class="map-legend" id="mapLegend" hidden>
-      <summary>Map key</summary>
+      <summary>Map legend</summary>
       <ul id="legendItems"></ul>
     </details>
     <div class="map-footer">
       <div class="map-status">
         <b id="lt" role="status">Loading road network…</b>
         <p id="msg" role="status" hidden></p>
+        <p id="regionProgress" role="status" hidden></p>
+        <button id="regionCancel" type="button" class="secondary" hidden>Cancel network load</button>
         <button id="graphRetry" type="button" class="secondary" hidden>Retry loading roads</button>
       </div>
-      <button id="wheelMode" type="button" class="quiet" aria-label="Zoom with the scroll wheel" aria-pressed="false" title="Scroll pans the map. Hold Ctrl while scrolling to zoom.">Scroll pans</button>
       <section id="playback" aria-label="Search playback" hidden>
-        <div class="playback-info">
-          <span><b id="sN">0</b> processed</span><span><b id="sQ">0</b> queue entries</span>
-          <label for="spd">Animation speed</label><input id="spd" type="range" min="0" max="100" value="60">
-        </div>
+        <div class="playback-info"><span><b id="sN">0</b> events</span><span id="queueCount" hidden><b id="sQ">0</b> queued</span></div>
+        <div class="playback-speed"><label for="spd">Speed<span class="sr"> of search animation</span></label><input id="spd" type="range" min="0" max="100" value="60"></div>
         <div class="playback-actions">
           <button id="pause" type="button" disabled>Pause</button>
           <button id="step" type="button" disabled>Step</button>
@@ -211,21 +285,32 @@
   </main>
 </div>
 
-<dialog id="welcome" aria-labelledby="wTitle">
-  <h2 id="wTitle"><img class="wordmark wordmark-lg" src="assets/chokepoint-wordmark.svg" alt="CHOKEPOINT"></h2>
-  <p>Explore Iloilo’s modeled road network. Start with Plaza Libertad and SM City Iloilo, or choose different locations.</p>
-  <ul>
-    <li><b>Route</b> finds a path using modeled road distance or fixed road speeds.</li>
-    <li><b>Disrupt</b> lets you simulate closures and measure how the trip changes.</li>
-    <li><b>Analyze</b> ranks tested links by their effect on sampled trips.</li>
-    <li><b>Compare</b> animates real search steps and checks optimal cost against Dijkstra.</li>
-  </ul>
-  <p>Drag to pan. On touchscreens, pinch to zoom. Over the map, scroll to pan or hold Ctrl while scrolling to zoom. Use the scroll control to switch its default action. If a trackpad pinch is handled by the browser, use the map’s + and − controls.</p>
-  <p>Use the map style menu for Streets, Satellite, or Hybrid. The two photo styles use Stadia’s localhost access. Select an A or B pin to open a nearby Google Street View, where available.</p>
-  <form method="dialog"><button id="wGo" class="primary" type="submit" autofocus>Back to the map</button></form>
-  <p class="dialog-credit">CC 204 · Data Structures and Algorithms</p>
+<dialog id="regionDialog" class="region-dialog" aria-labelledby="regionTitle">
+  <div class="split-heading"><h2 id="regionTitle">Road network</h2><form method="dialog"><button class="secondary" type="submit">Close</button></form></div>
+  <label class="sr" for="regionSearch">Search networks</label>
+  <input type="text" id="regionSearch" role="combobox" aria-autocomplete="list" aria-controls="regionChoices" aria-expanded="true" placeholder="Search networks" autocomplete="off">
+  <p class="hint">Choose a prepared routing network. Place search also covers locations outside these networks.</p>
+  <div id="regionChoices" role="listbox" aria-label="Road networks"></div>
+  <p class="hint" id="regionEmpty" role="status" hidden>No matching networks.</p>
 </dialog>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-<script type="module" src="js/main.js"></script>
+<dialog id="welcome" aria-labelledby="wTitle">
+  <h2 id="wTitle">CHOKEPOINT</h2>
+  <dl class="quick-start">
+    <div><dt>Route</dt><dd>Choose two locations and find the shortest or estimated fastest route.</dd></div>
+    <div><dt>Disrupt</dt><dd>Draw a line or area to close roads and inspect the resulting detour.</dd></div>
+    <div><dt>Analyze</dt><dd>Rank tested road links by their impact on sampled trips.</dd></div>
+    <div><dt>Compare</dt><dd>Visualize searches and compare results against Dijkstra.</dd></div>
+  </dl>
+  <details class="method"><summary>Map gestures and keyboard</summary>
+    <p>Drag or use the arrow keys to pan. Pinch, press + or −, or hold Ctrl while scrolling to zoom. The mouse button beside the map style switches between scroll-to-pan and scroll-to-zoom. Press Enter to select the map center while picking an endpoint, and Escape to cancel.</p>
+  </details>
+  <details class="method"><summary>Offline maps and online services</summary>
+    <p>Offline map uses local streets, labels, search indexes, and road data. Worldwide search and Stadia’s Satellite and Hybrid styles use internet access. Select a map pin to open nearby Google Street View when connected.</p>
+    <p>Online search by <a id="searchProvider" href="https://photon.komoot.io/" target="_blank" rel="noopener noreferrer">Photon</a> · <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a></p>
+  </details>
+  <form class="help-actions" method="dialog"><p class="dialog-credit">CC 204 · Data Structures and Algorithms</p><button id="wGo" class="primary" type="submit" autofocus>Back to the map</button></form>
+</dialog>
+<script src="assets/vendor/leaflet/dist/leaflet.js"></script>
+<script src="js/bootstrap.js"></script>
 </body>
 </html>

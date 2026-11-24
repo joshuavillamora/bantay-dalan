@@ -1,0 +1,5 @@
+# Administrative coverage outlines
+
+These local GeoJSON outlines describe where each extract was prepared. Routability still depends on the modeled directed graph. Iloilo City and Iloilo Province use the DPWH municipal boundary snapshot. Province draws the 43 provincial LGU polygons separately. The eight regional outlines and the main Panay land polygon come from the medium-resolution 2026-Q3 boundary release. Its geometry is derived from NAMRIA and PSA data via OCHA COD-AB. The upstream map package provides its MIT notice and attributes underlying data to CC BY 3.0 IGO. The app redistributes selected features as gzip-compressed GeoJSON.
+
+[DPWH municipal boundaries](https://services1.arcgis.com/IwZZTMxZCmAmFYvF/ArcGIS/rest/services/City_Municipal_Boundaries/FeatureServer/0) · [OCHA COD-AB Philippines](https://data.humdata.org/dataset/cod-ab-phl) · [Source geometry and processing](https://github.com/faeldon/philippines-json-maps/tree/680e32e62baeccbcd8845d3b1387bc67c1baf78a) · [CC BY 3.0 IGO](https://creativecommons.org/licenses/by/3.0/igo/) · [Mirror's MIT notice](LICENSE-maps.txt)

@@ -7,6 +7,7 @@ import { nearestRoadVertex } from '../graph/road-graph.js';
 import { findChokepoints } from '../analysis/chokepoints.js';
 import { getClosures, getRoutingGraph, addLinkClosure } from './closures.js';
 import { on } from '../events.js';
+import { regionLabel } from '../ui/region-labels.js';
 
 let base, results = [], controller, shown = false, cached;
 const status = (text, announcedOnly = false) => {
@@ -24,9 +25,9 @@ function render() {
     return `<li><span class="rank" aria-hidden="true">${i + 1}</span>
       <button type="button" class="choke-preview" data-preview="${i}" aria-pressed="false">
         <strong>${esc(name)}</strong>
-        <small>${c.used}/${c.total} sampled trips affected · ${c.cut} unreachable</small>
+        <small>Affected trips · ${c.used}/${c.total} · Unreachable trips · ${c.cut}</small>
         ${detour ? `<small>${detour}</small>` : ''}
-        <small class="impact-score">${mins(c.score)} min · criticality score</small>
+        <small class="impact-score">Impact score · ${mins(c.score)} min</small>
       </button>
       <button type="button" class="quiet" data-close="${i}" aria-label="Simulate closure of ${esc(name)}">Simulate</button>
       <details class="link-detail"><summary>Technical details</summary><p>Graph link <code>${esc(c.key)}</code></p></details>
@@ -93,7 +94,7 @@ export function initChokepoints() {
     $('chokeCancel').hidden = true;
     $('chokeBtn').disabled = false;
     $('analysisScope').textContent = g.region?.demand
-      ? `Rank tested links for ${g.region.name} using ${g.region.demand.length} sampled road points.`
+      ? `Rank tested links for ${regionLabel(g.region)} using ${g.region.demand.length} sampled road points.`
       : 'Rank tested road links by their impact on sampled trips between Iloilo landmarks.';
     $('analysisMetrics').hidden = true;
     $('chokeBtn').textContent = 'Find critical roads';

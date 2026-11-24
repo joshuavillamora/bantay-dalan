@@ -1,5 +1,5 @@
 /* The letters and shapes match the route form. */
-import { map, tooltipText } from './map.js';
+import { map, setLegend, tooltipText } from './map.js';
 
 const pins = { s: null, e: null };
 let canDrag = true;
@@ -40,18 +40,21 @@ export function setPointMarker(which, ll, name, onMove) {
   const isStart = which === 's';
   const title = `${isStart ? 'Start A' : 'Destination B'}: ${name}`;
   if (!pins[which]) {
-    const icon = L.divIcon({
-      className: 'endpoint-marker', html: `<span class="endpoint-pin ${isStart ? 'start' : 'end'}">${isStart ? 'A' : 'B'}</span>`,
-      iconSize: [44, 44], iconAnchor: [22, 22], tooltipAnchor: [15, 0]
+    const icon = L.icon({
+      iconUrl: `assets/icons/display/point-${isStart ? 'a' : 'b'}.png`, className: 'endpoint-marker',
+      // The visible tips sit near x=250, y=496 in the original 512px canvases.
+      iconSize: [38, 50], iconAnchor: [isStart ? 18.4 : 18.5, 49.2], tooltipAnchor: [16, -29], popupAnchor: [0, -45]
     });
-    pins[which] = L.marker(ll, { icon, draggable: canDrag, autoPan: true }).addTo(map)
+    pins[which] = L.marker(ll, { icon, alt: isStart ? 'Start A' : 'Destination B', draggable: canDrag, autoPan: true }).addTo(map)
       .bindTooltip(tooltipText(title))
       .bindPopup(streetPopup(ll, title), { maxWidth: 230, autoPanPaddingTopLeft: [10, 72] })
       .on('dragend', e => onMove(which, e.target.getLatLng()));
+    setLegend(isStart ? 'start' : 'destination', true);
   } else {
     pins[which].setLatLng(ll).setTooltipContent(tooltipText(title)).setPopupContent(streetPopup(ll, title));
   }
   const element = pins[which].getElement();
   element.title = title;
+  element.alt = title;
   element.setAttribute('aria-label', title);
 }
