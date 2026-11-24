@@ -80,18 +80,25 @@ button svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke
   font: 600 .76rem var(--mono);
 }
 .point-label.end, .endpoint-pin.end { background: var(--blue); border-radius: 4px; }
-.swap { grid-column: 2; grid-row: 2; height: 39px; display: grid; place-items: center; padding: 0; }
+.swap { grid-column: 2; grid-row: 2; align-self: start; margin-top: 26px; height: 39px; display: grid; place-items: center; padding: 0; }
 .search { position: relative; }
 input[type="text"], select { width: 100%; min-height: 39px; border: 1px solid #b9c4c6; padding: 7px 9px; border-radius: 5px; background: var(--white); }
 .suggest {
-  list-style: none; position: absolute; z-index: 3; left: 0; right: 0; padding: 3px;
-  max-height: 174px; overflow: auto; margin-top: 3px; background: #fff; border: 1px solid #aebbbf; border-radius: 5px;
-  box-shadow: 0 4px 10px #19292e1a;
+  margin-top: 3px; background: #fff; border: 1px solid #aebbbf; border-radius: 5px;
 }
-.suggest li { padding: 7px 8px; font-size: .88rem; }
+.suggest-heading { padding: 6px 9px 1px; color: var(--muted); font-size: .84rem; font-weight: 600; }
+.suggest ul { list-style: none; padding: 3px; max-height: min(182px, 27dvh); overflow: auto; }
+.suggest li { min-height: 42px; padding: 6px 8px; font-size: .88rem; overflow-wrap: anywhere; }
 .suggest .opt { cursor: pointer; }
 .suggest .opt:hover, .suggest .active { background: #fff2ca; }
 .suggest small { display: block; color: var(--muted); }
+.search-status { padding: 6px 9px; color: var(--muted); font-size: .84rem; }
+.search-status:empty { padding: 0; }
+.endpoint-access, .search-credit { margin-top: 5px; }
+.search-credit { color: var(--muted); font-size: .78rem; }
+.search-credit a { color: var(--blue); }
+.search input[aria-invalid="true"] { border-color: #ac2c28; }
+.search input[aria-invalid="true"] ~ .endpoint-access { color: #96312d; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .tools button { font-size: .87rem; }
 [data-mode], .map-button, .map-legend summary { touch-action: manipulation; }

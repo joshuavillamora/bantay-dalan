@@ -4,17 +4,18 @@ import { on } from '../events.js';
 import { $, setMessage } from '../utils/dom.js';
 import { ALGORITHMS } from '../algorithms/index.js';
 import { lpaReady, lpaReset, lpaRepair } from '../algorithms/lpa-star.js';
-import { snapRouteEndpoints, routeMetrics } from '../graph/road-graph.js';
-import { removeClosedRoads } from '../graph/closure-filter.js';
+import { prepareReverseAdjacency, snapRouteEndpoints, snapRoutePoint, routeMetrics } from '../graph/road-graph.js';
+import { blockedEdges } from '../graph/closure-filter.js';
 import { fitTrip, reducedMotion } from '../map/map.js';
 import { exploreLayer } from '../map/explore-layer.js';
 import { showHead, moveHead, hideHead, clearRoute, animateRoute, showPreviousRoute } from '../map/route-view.js';
 import { refreshControls, setStatus, setCounts, showPlayback, renderRoute, renderImpact, samePath } from '../ui/dashboard.js';
 import { renderRepair } from '../ui/results-table.js';
-import { getClosures } from './closures.js';
+import { getClosures, getRoutingGraph } from './closures.js';
 import { selectedAlgorithm } from './algorithm-panel.js';
+import { connectionMessage, noRouteMessage } from './route-status.js';
 
-let base, keepSearch = false;
+let base, searchView;
 const stepsPerFrame = () => Math.pow(10, (+$('spd').value - 25) / 25);
 
 function cancelRun() {
@@ -25,21 +26,22 @@ function cancelRun() {
 }
 
 function clearSearch() {
+  searchView = null;
   exploreLayer.clear();
   hideHead();
   setCounts(0);
   showPlayback(false);
-  keepSearch = false;
 }
 
 function invalidate(note) {
+  const outdated = state.run && note;
   cancelRun(); clearSearch(); clearRoute(); showPreviousRoute(null);
   state.route = state.original = null;
   lpaReset(); renderRepair(null);
   renderRoute(null, note);
   renderImpact(null, null, getClosures());
   setMessage();
-  if (base) setStatus(note ? 'Route needs an update' : 'Ready to route');
+  if (base) setStatus(outdated ? 'Outdated route calculation discarded' : note ? 'Route needs an update' : 'Ready to route');
 }
 
 function startRun({ visual = false, changed = false, repair = false } = {}) {
@@ -51,43 +53,63 @@ function startRun({ visual = false, changed = false, repair = false } = {}) {
   state.route = null;
 
   const closures = getClosures();
-  showPreviousRoute(state.original?.points);
+  try { showPreviousRoute(state.original?.points); }
+  catch (error) { console.error('Original route visualization failed', error); }
   renderRoute(null, 'Calculating the current route…');
   renderImpact(null, state.original, closures, changed);
   const { s, t } = snapRouteEndpoints(base, state.start, state.end);
   $('from').setAttribute('aria-invalid', String(s < 0));
   $('to').setAttribute('aria-invalid', String(t < 0));
   if (s < 0 || t < 0) {
-    const bad = s < 0 && t < 0 ? 'Start and destination are' : `${s < 0 ? 'Start' : 'Destination'} is`;
-    setStatus('Choose a nearby road');
-    const note = `${bad} more than 1.5 km from the modeled network. Try a saved place or pick a point closer to a road.`;
-    renderRoute(null, note); setMessage(note);
+    const invalid = s < 0 ? state.start : state.end;
+    const message = connectionMessage(snapRoutePoint(base, invalid).reason);
+    setStatus('Endpoint unavailable');
+    renderRoute(null, message); setMessage(message);
     return;
   }
 
   const key = selectedAlgorithm(), algo = ALGORITHMS[key], mode = state.mode;
   const animate = visual && !reducedMotion();
-  const run = { name: algo.name, mode, closures, changed, repair, visual, prior, count: 0, acc: 0, ms: 0 };
+  const run = { id: state.runId, name: algo.name, s, t, mode, closures, changed, repair, visual, animate, prior,
+    usesClosureKeys: algo.handlesClosures, count: 0, acc: 0, ms: 0 };
   const start = performance.now();
   try {
-    run.graph = algo.handlesClosures ? base : removeClosedRoads(base, closures);
+    run.graph = algo.handlesClosures ? base : getRoutingGraph();
     const begin = repair ? start : performance.now();
-    run.it = repair ? lpaRepair(closures) : algo.run(run.graph, s, t, mode, closures);
+    if (repair) run.it = lpaRepair(closures);
+    else if (algo.handlesClosures) run.it = algo.run(run.graph, s, t, mode, closures);
+    else run.it = algo.run(run.graph, s, t, mode);
     run.ms = performance.now() - begin;
-    state.run = run;
-    showPlayback(visual);
-    if (visual) {
+  } catch (error) {
+    failedRun(error);
+    return;
+  }
+  state.run = run;
+  showPlayback(visual);
+  if (visual) {
+    searchView = run;
+    try {
       showHead(run.graph, s);
       if (!changed) fitTrip([state.start, state.end]);
+    } catch (error) {
+      failedSearchView(error);
     }
-    setStatus(repair ? 'LPA* is repairing the route…' : visual ? `${run.name} is searching…` : 'Finding route…');
-    refreshControls();
-    if (animate) state.raf = requestAnimationFrame(frame);
-    else advance(Infinity);
-  } catch { failedRun(); }
+  }
+  setStatus(repair ? 'LPA* is repairing the route…' : visual ? `${run.name} is searching…` : 'Finding route…');
+  run.preparing = key !== 'astar' && !run.graph.radj;
+  refreshControls();
+  if (run.preparing) {
+    prepareReverseAdjacency(run.graph).then(() => {
+      if (state.run !== run) return;
+      run.preparing = false;
+      refreshControls();
+      if (!state.paused) state.raf = requestAnimationFrame(frame);
+    }, error => { if (state.run === run) failedRun(error); });
+  } else state.raf = requestAnimationFrame(frame);
 }
 
-function failedRun() {
+function failedRun(error) {
+  console.error('Route calculation failed', error);
   cancelRun(); clearSearch(); lpaReset();
   setStatus('Route calculation failed');
   renderRoute(null, 'Try finding the route again.');
@@ -95,74 +117,127 @@ function failedRun() {
   setMessage('Try finding the route again. If the problem persists, reload the road network.');
 }
 
-function frame() {
-  const run = state.run;
-  if (!run || state.paused) return;
-  run.acc += stepsPerFrame();
-  const steps = Math.floor(run.acc);
-  run.acc -= steps;
-  if (steps) advance(steps);
-  if (state.run && !state.paused) state.raf = requestAnimationFrame(frame);
-}
-
-function advance(limit) {
-  const run = state.run, g = run.graph, render = run.visual;
-  const begin = performance.now(), events = [];
-  let result, last;
-  try {
-    for (let i = 0; i < limit; i++) {
-      result = run.it.next();
-      if (result.done) break;
-      run.count++; last = result.value;
-      if (render) events.push(last);
-    }
-    run.ms += performance.now() - begin;
-
-    const point = i => [g.lat[i], g.lng[i]];
-    for (const { u, p, found, direction } of events) {
-      const kind = direction || 'explored';
-      if (run.repair) exploreLayer.add('repair', point(u));
-      else {
-        for (const v of found) exploreLayer.add(direction || 'frontier', point(v));
-        if (p >= 0) exploreLayer.add(kind, point(p), point(u));
-      }
-    }
-    if (last && render) { moveHead(g, last.u); setCounts(run.count, last.q); }
-    if (result?.done) finish(run, result.value);
-  } catch { failedRun(); }
-}
-
-function finish(run, path) {
-  state.run = null; state.paused = false; refreshControls(); hideHead();
-  keepSearch = run.visual;
-  const { graph, mode, closures } = run;
-  const points = path?.map(i => [graph.lat[i], graph.lng[i]]);
-  state.route = { name: run.name, path, points, mode, closures, ...(path && routeMetrics(graph, path)) };
-  if (run.repair) renderRepair({ ...run, path });
-  displayRoute(state.route, { changed: run.changed, fit: true, animate: run.visual });
-}
-
-function displayRoute(route, { changed = false, fit = false, animate = false } = {}) {
-  const { path, points, closures } = route;
-  renderRoute(route);
-  renderImpact(route, state.original, closures);
-  const previous = samePath(state.original?.path, path) ? null : state.original?.points;
-  showPreviousRoute(previous);
-  if (!path) {
-    setStatus('No route available');
-    setMessage(closures.length
-      ? 'The modeled roads cannot connect these endpoints with the active closures. Reopen a road or choose different endpoints.'
-      : 'The modeled roads cannot connect these endpoints. Try a different start or destination.');
-  } else {
-    setStatus(changed ? 'Route updated' : 'Route found');
-    const endpoints = [state.start, state.end];
-    if (fit) fitTrip(previous ? [...previous, ...points, ...endpoints] : [...points, ...endpoints]);
-    const my = state.runId;
-    animateRoute(points, () => my === state.runId, animate);
+function failedSearchView(error) {
+  if (!searchView || searchView.id !== state.runId || searchView.viewFailed) return;
+  console.error('Search visualization failed', error);
+  searchView.viewFailed = true;
+  searchView.animate = false;
+  hideHead();
+  if (!searchView.routeViewFailed) {
+    setMessage([state.route?.failure, 'Search visualization failed.'].filter(Boolean).join(' '));
   }
 }
 
+function frame() {
+  const run = state.run;
+  if (!run || run.preparing || state.paused) return;
+  let steps = Infinity;
+  if (run.animate && !run.skip) {
+    run.acc += stepsPerFrame();
+    steps = Math.floor(run.acc);
+    run.acc -= steps;
+  }
+  if (steps) advance(steps, !run.skip, performance.now() + 8);
+  if (state.run && !state.paused) state.raf = requestAnimationFrame(frame);
+}
+
+function advance(limit, paint = true, deadline = Infinity) {
+  const run = state.run, render = run.visual && paint && !run.viewFailed;
+  const begin = performance.now(), events = [];
+  let result, last, route;
+  try {
+    for (let i = 0; i < limit; i++) {
+      if (i && !(i % 32) && performance.now() >= deadline) break;
+      result = run.it.next();
+      if (result.done) break;
+      run.count++; last = result.value;
+      if (render) {
+        if (events.length === 8000) events.splice(0, 4000);
+        events.push(last);
+      }
+    }
+    run.ms += performance.now() - begin;
+    if (result?.done) route = routeResult(run, result.value);
+  } catch (error) {
+    failedRun(error);
+    return;
+  }
+
+  if (render) {
+    try {
+      const g = run.graph, point = i => [g.lat[i], g.lng[i]];
+      for (const { u, p, found, direction } of events) {
+        const kind = direction || 'explored';
+        if (run.repair) exploreLayer.add('repair', point(u));
+        else {
+          for (const v of found) exploreLayer.add(direction || 'frontier', point(v));
+          if (p >= 0) exploreLayer.add(kind, point(p), point(u));
+        }
+      }
+      if (last) moveHead(g, last.u);
+    } catch (error) {
+      failedSearchView(error);
+    }
+  }
+  if (last && run.visual) setCounts(run.count, last.q);
+  if (route) finish(run, route);
+}
+
+function routeResult(run, path) {
+  const { graph, s, t, mode, closures } = run;
+  const points = path?.map(i => [graph.lat[i], graph.lng[i]]);
+  const failure = path ? null : noRouteMessage(base, s, t, mode, closures.length > 0);
+  const metrics = path && routeMetrics(graph, path, run.usesClosureKeys ? blockedEdges(graph, closures) : undefined);
+  return { name: run.name, path, points, mode, closures, failure, ...metrics };
+}
+
+function finish(run, route) {
+  state.run = null; state.paused = false; refreshControls();
+  state.route = route;
+  if (run.repair) renderRepair({ ...run, path: route.path });
+  displayRoute(route, run);
+}
+
+function displayRoute(route, run, cancelled = false) {
+  const { path, points, failure } = route;
+  renderRoute(route);
+  renderImpact(route, state.original, route.closures);
+  const previous = samePath(state.original?.path, path) ? null : state.original?.points;
+  if (cancelled) setStatus('Search cancelled · Previous result shown');
+  else if (path) setStatus(run?.changed ? 'Route updated' : 'Route found');
+  else setStatus('No route available');
+  setMessage([failure, run?.viewFailed && 'Search visualization failed.'].filter(Boolean).join(' '));
+
+  const id = state.runId;
+  const stillCurrent = () => id === state.runId;
+  const onError = error => {
+    if (!stillCurrent()) return;
+    console.error('Route visualization failed', error);
+    if (run) run.routeViewFailed = true;
+    if (path) {
+      setStatus('Route found · Visualization failed');
+      setMessage('The calculated route is available in Route. Try finding it again to display it on the map.');
+    }
+    clearRoute();
+  };
+  try {
+    hideHead();
+    showPreviousRoute(previous);
+  } catch (error) {
+    console.warn('Could not update the reference map overlays.', error);
+  }
+  if (!path) return;
+  if (run) {
+    const endpoints = [state.start, state.end];
+    try { fitTrip(previous ? [...previous, ...points, ...endpoints] : [...points, ...endpoints]); }
+    catch (error) { console.warn('Could not fit the map to the route.', error); }
+  }
+  try { animateRoute(points, { stillCurrent, animate: run?.visual, onError }); }
+  catch (error) { onError(error); }
+}
+
 export function initRunController() {
+  exploreLayer.on('error', ({ error }) => failedSearchView(error));
   on('graph:ready', g => {
     base = g; state.graphReady = true;
     setStatus('Ready to route'); refreshControls();
@@ -177,11 +252,14 @@ export function initRunController() {
     else { setStatus(state.run.repair ? 'LPA* is repairing the route…' : `${state.run.name} is searching…`); frame(); }
     refreshControls();
   };
-  $('step').onclick = () => { if (state.run && state.paused) advance(1); };
+  $('step').onclick = () => { if (state.run && !state.run.preparing && state.paused) advance(1); };
   $('skip').onclick = () => {
     if (!state.run) return;
     cancelAnimationFrame(state.raf);
-    advance(Infinity);
+    state.run.skip = true;
+    state.paused = false;
+    refreshControls();
+    if (!state.run.preparing) state.raf = requestAnimationFrame(frame);
   };
   $('reset').onclick = () => { invalidate(); setStatus('Search reset'); };
 
@@ -198,8 +276,7 @@ export function initRunController() {
         }
         if (prior) {
           state.route = prior;
-          displayRoute(prior);
-          setMessage('Search cancelled. Showing the last completed route.');
+          displayRoute(prior, undefined, true);
         } else {
           setStatus('Search cancelled');
           renderRoute(null, 'Search algorithm changed. Find the route again.');
@@ -212,6 +289,6 @@ export function initRunController() {
     if (!state.route && !state.original && !state.run) return;
     state.original ??= state.route || state.run?.prior || null;
     const repair = !state.run && selectedAlgorithm() === 'lpa' && lpaReady();
-    startRun({ changed: true, repair, visual: repair && keepSearch });
+    startRun({ changed: true, repair, visual: repair && !!searchView && !searchView.viewFailed });
   });
 }

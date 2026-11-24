@@ -4,15 +4,18 @@ import { closureDraft, showClosure } from '../map/closure-view.js';
 import { $, setMessage } from '../utils/dom.js';
 import { hav } from '../utils/geo.js';
 import { esc } from '../utils/format.js';
-import { blockedEdges } from '../graph/closure-filter.js';
+import { blockedEdges, removeClosedRoads } from '../graph/closure-filter.js';
 import { emit, on } from '../events.js';
 
 let graph, drawing = false, corner, draft, nextId = 1;
 let closures = [];
+let routingGraph;
 export const getClosures = () => closures;
+export const getRoutingGraph = () => routingGraph ??= removeClosedRoads(graph, closures);
 export const isDrawing = () => drawing;
 
 function changed() {
+  routingGraph = undefined;
   const count = closures.length;
   $('closeClear').disabled = !count;
   $('closeUndo').hidden = !count;
@@ -91,7 +94,7 @@ export function addLinkClosure(keys, name) {
 }
 
 export function initClosures() {
-  on('graph:ready', g => { graph = g; $('closeDraw').disabled = false; });
+  on('graph:ready', g => { graph = g; routingGraph = undefined; $('closeDraw').disabled = false; });
   on('workspace:changed', mode => { if (drawing && mode !== 'disrupt') setDrawing(false); });
   map.on('mousemove', e => { if (draft) draft.setLatLngs([corner, e.latlng]); });
   $('closeDraw').onclick = () => {

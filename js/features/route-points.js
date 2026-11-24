@@ -4,10 +4,26 @@ import { map, setMapHint } from '../map/map.js';
 import { setMarkerDragging, setPointMarker } from '../map/markers.js';
 import { $, setMessage } from '../utils/dom.js';
 import { PLACES, DEFAULT_START, DEFAULT_END } from '../config.js';
+import { snapRoutePoint } from '../graph/road-graph.js';
+import { connectionMessage } from './route-status.js';
+import { fmtD } from '../utils/format.js';
 import { emit, on } from '../events.js';
 import { isDrawing, handleMapClick } from './closures.js';
 
-let picking = null, routeMode = true, locationRequest = 0;
+let picking = null, routeMode = true, locationRequest = 0, graph;
+
+function showRoadAccess(which) {
+  const point = which === 's' ? state.start : state.end;
+  if (!graph || !point) return;
+  const field = $(which === 's' ? 'from' : 'to');
+  const hint = $(field.id + 'Access');
+  const { i, d, reason } = snapRoutePoint(graph, point);
+  field.setAttribute('aria-invalid', String(i < 0));
+  hint.textContent = i < 0
+    ? connectionMessage(reason)
+    : d >= 1 ? `The pin marks your location. The route uses a modeled road point ${fmtD(d)} away in a straight line.` : '';
+  hint.hidden = !hint.textContent;
+}
 const movePin = (which, ll) => {
   if (routeMode && !picking && !isDrawing()) setPoint(which, [ll.lat, ll.lng], 'Pinned point');
   else setPointMarker(which, which === 's' ? state.start : state.end, state.names[which], movePin);
@@ -18,7 +34,7 @@ function updatePoint(which, ll, name) {
   setPointMarker(which, ll, name, movePin);
   const field = $(which === 's' ? 'from' : 'to');
   field.value = name;
-  field.removeAttribute('aria-invalid');
+  showRoadAccess(which);
 }
 export function setPoint(which, ll, name) {
   updatePoint(which, ll, name);
@@ -42,6 +58,7 @@ function setPicking(which) {
 }
 
 export function initRoutePoints() {
+  on('graph:ready', g => { graph = g; showRoadAccess('s'); showRoadAccess('e'); });
   const click = ll => {
     if (isDrawing()) { handleMapClick(ll); return; }
     if (picking) setPoint(picking, [ll.lat, ll.lng], 'Pinned point');

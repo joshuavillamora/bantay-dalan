@@ -7,7 +7,7 @@ export function refreshControls() {
   $('visualize').disabled = !state.graphReady;
   $('pause').disabled = !state.run?.visual;
   $('skip').disabled = !state.run?.visual;
-  $('step').disabled = !state.run?.visual || !state.paused;
+  $('step').disabled = !state.run?.visual || state.run.preparing || !state.paused;
   $('pause').textContent = state.paused ? 'Resume' : 'Pause';
 }
 export const showPlayback = visible => { $('playback').hidden = !visible; };
@@ -23,7 +23,7 @@ export function renderRoute(route, note) {
   $('sD').textContent = route?.path ? fmtD(route.dist) : '—';
   $('sT').textContent = route?.path ? fmtT(route.time) : '—';
   $('routeDetail').textContent = route
-    ? `${route.path ? 'Route available' : 'No route available'} · ${costName(route.mode)} · ${route.name}`
+    ? route.failure || `Route available · ${costName(route.mode)} · ${route.name}`
     : note || 'Travel estimates use fixed road speeds.';
 }
 
@@ -41,7 +41,7 @@ export function renderImpact(current, original, closures, pending = false) {
   }
   let summary = pending === 'failed' ? 'Could not recalculate the route. Try finding it again.' : 'Recalculating for the current closures…';
   if (!pending) {
-    if (!current?.path) summary = original.path ? 'No route is available with the current closures.' : 'The trip remains unreachable.';
+    if (!current?.path) summary = current?.failure || 'The trip remains unreachable.';
     else if (!original.path) summary = 'A route is now available.';
     else if (samePath(original.path, current.path)) summary = 'The optimal route is unchanged.';
     else {

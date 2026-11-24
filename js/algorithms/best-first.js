@@ -2,9 +2,19 @@
 import { Heap } from '../core/heap.js';
 import { edgeCost, heuristic, tracePath } from './common.js';
 
-export function* bestFirst(g, s, t, mode, { priority }) {
-  const n = g.lat.length, cost = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1), done = new Uint8Array(n);
-  const heap = new Heap(), h = heuristic(g, t, mode);
+export const bestFirstWorkspace = n => ({
+  cost: new Float64Array(n).fill(Infinity), prev: new Int32Array(n).fill(-1), done: new Uint8Array(n), touched: []
+});
+
+export function* bestFirst(g, s, t, mode, useHeuristic = false, workspace) {
+  const { cost, prev, done } = workspace || bestFirstWorkspace(g.lat.length);
+  const touched = workspace?.touched;
+  if (touched) {
+    for (const v of touched) { cost[v] = Infinity; prev[v] = -1; done[v] = 0; }
+    touched.length = 0;
+    touched.push(s);
+  }
+  const heap = new Heap(), estimate = useHeuristic ? heuristic(g, t, mode) : () => 0;
   cost[s] = 0; heap.push(s, 0);
   while (heap.size) {
     const u = heap.pop();
@@ -15,8 +25,8 @@ export function* bestFirst(g, s, t, mode, { priority }) {
       if (done[v]) continue;
       const nc = cost[u] + edgeCost(mode, d, sp);
       if (nc < cost[v]) {
-        if (cost[v] === Infinity) found.push(v);
-        cost[v] = nc; prev[v] = u; heap.push(v, priority(nc, h(v)));
+        if (cost[v] === Infinity) { found.push(v); touched?.push(v); }
+        cost[v] = nc; prev[v] = u; heap.push(v, nc + estimate(v));
       }
     }
     yield { u, p: prev[u], found, q: heap.size };

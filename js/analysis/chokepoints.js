@@ -4,25 +4,45 @@
    3. Close each heavily used link in turn, re-route the trips that used it, and measure the damage:
         score = extra travel seconds over all affected trips + penalty for every trip that becomes impossible.
    4. Return the links with the highest score. */
-import { shortestPath } from '../algorithms/solve.js';
-import { reverseAdjacency, routeMetrics } from '../graph/road-graph.js';
-
-const tick = () => new Promise(r => setTimeout(r, 0));
+import { astar } from '../algorithms/astar.js';
+import { bestFirstWorkspace } from '../algorithms/best-first.js';
+import { prepareReverseAdjacency, reverseAdjacency, routeMetrics } from '../graph/road-graph.js';
+import { nextTask, runInSlices } from '../utils/work-slices.js';
 
 export async function findChokepoints(g, demand, { candidates = 40, topK = 8, penalty = 1800, onProgress = () => {}, signal } = {}) {
-  const n = g.lat.length, radj = reverseAdjacency(g), demandSet = new Set(demand.map(d => d.i));
-  const neighbours = u => { const s = new Set(); for (const e of g.adj[u]) s.add(e[0]); for (const e of radj[u]) s.add(e[0]); return s.size; };
+  await prepareReverseAdjacency(g);
+  signal?.throwIfAborted();
+  const n = g.lat.length, { offsets, vertices } = reverseAdjacency(g), demandSet = new Set(demand.map(d => d.i));
+  const workspace = bestFirstWorkspace(n);
+  const trial = { lat: g.lat, lng: g.lng, adj: g.adj.slice(), ways: g.ways };
+  const neighbours = u => {
+    const s = new Set();
+    for (const [v] of g.adj[u]) s.add(v);
+    for (let i = offsets[u]; i < offsets[u + 1]; i++) s.add(vertices[i]);
+    return s.size;
+  };
   const isJunction = u => neighbours(u) !== 2;          // dead ends and 3+ way intersections end a link
+  let sliceStart = performance.now();
+  async function pathBetween(network, start, end) {
+    if (performance.now() - sliceStart >= 8) {
+      await nextTask();
+      signal?.throwIfAborted();
+      sliceStart = performance.now();
+    }
+    const result = await runInSlices(astar(network, start, end, 'fast', workspace), { keepGoing: () => !signal?.aborted });
+    signal?.throwIfAborted();
+    return result.value;
+  }
 
   // 1. base routes
   const trips = [], pairs = demand.length * (demand.length - 1) / 2;
   let routed = 0;
   for (let a = 0; a < demand.length; a++) for (let b = a + 1; b < demand.length; b++) {
     signal?.throwIfAborted();
-    const path = shortestPath(g, demand[a].i, demand[b].i);
+    const path = await pathBetween(g, demand[a].i, demand[b].i);
     if (path && path.length > 1) trips.push({ path, time: routeMetrics(g, path).time });
     routed++;
-    if (routed % 6 === 0 || routed === pairs) { onProgress('Routing trips', routed, pairs); await tick(); }
+    if (routed % 6 === 0 || routed === pairs) { onProgress('Routing trips', routed, pairs); await nextTask(); }
   }
 
   // 2. links and how many trips use each
@@ -51,16 +71,16 @@ export async function findChokepoints(g, demand, { candidates = 40, topK = 8, pe
     const link = used[c], touched = new Set(link.nodes), closedPairs = new Set();
     for (let k = 1; k < link.nodes.length; k++) { closedPairs.add(link.nodes[k-1] * n + link.nodes[k]); closedPairs.add(link.nodes[k] * n + link.nodes[k-1]); }
     const saved = [...touched].map(u => [u, g.adj[u]]);
-    saved.forEach(([u, list]) => { g.adj[u] = list.filter(e => !closedPairs.has(u * n + e[0])); });   // close (restored below, before any await)
+    saved.forEach(([u, list]) => { trial.adj[u] = list.filter(e => !closedPairs.has(u * n + e[0])); });
     let extra = 0, cut = 0, rerouted = 0;
     try {
       for (const ti of link.trips) {
-        const t = trips[ti], path = shortestPath(g, t.path[0], t.path[t.path.length - 1]);
-        if (!path) cut++; else { rerouted++; extra += Math.max(0, routeMetrics(g, path).time - t.time); }
+        const t = trips[ti], path = await pathBetween(trial, t.path[0], t.path[t.path.length - 1]);
+        if (!path) cut++; else { rerouted++; extra += Math.max(0, routeMetrics(trial, path).time - t.time); }
       }
-    } finally { saved.forEach(([u, list]) => { g.adj[u] = list; }); }
+    } finally { saved.forEach(([u, list]) => { trial.adj[u] = list; }); }
     scored.push({ link, extra, cut, rerouted, score: extra + penalty * cut });
-    onProgress('Testing closures', c + 1, used.length); await tick();
+    onProgress('Testing closures', c + 1, used.length); await nextTask();
   }
   signal?.throwIfAborted();
 

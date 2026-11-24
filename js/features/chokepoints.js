@@ -3,13 +3,12 @@ import { showChokepoints, focusChokepoint, clearChokepoints } from '../map/choke
 import { $, setMessage } from '../utils/dom.js';
 import { esc, fmtClosureCount } from '../utils/format.js';
 import { PLACES, CHOKEPOINTS } from '../config.js';
-import { nearestNode } from '../graph/road-graph.js';
-import { removeClosedRoads } from '../graph/closure-filter.js';
+import { nearestRoadVertex } from '../graph/road-graph.js';
 import { findChokepoints } from '../analysis/chokepoints.js';
-import { getClosures, addLinkClosure } from './closures.js';
+import { getClosures, getRoutingGraph, addLinkClosure } from './closures.js';
 import { on } from '../events.js';
 
-let base, results = [], controller, shown = false;
+let base, results = [], controller, shown = false, cached;
 const status = text => { $('chokeHint').textContent = text; };
 const mins = s => (s / 60).toFixed(1);
 
@@ -32,25 +31,26 @@ function render() {
 
 async function analyze() {
   if (controller || !base) return;
+  const closures = getClosures();
+  if (cached?.closures === closures) {
+    display(cached);
+    return;
+  }
   controller = new AbortController();
   const { signal } = controller;
   $('chokeBtn').disabled = true;
   $('chokeCancel').hidden = false;
   results = []; shown = false; render(); clearChokepoints();
-  const closures = getClosures();
   status('Preparing sampled trips…');
   try {
-    const graph = removeClosedRoads(base, closures);
-    const demand = CHOKEPOINTS.places.map(name => ({ name, i: nearestNode(graph, PLACES[name]).i })).filter(d => d.i >= 0);
+    const graph = getRoutingGraph();
+    const demand = CHOKEPOINTS.places.map(name => ({ name, i: nearestRoadVertex(graph, PLACES[name], base).i })).filter(d => d.i >= 0);
     const { chokepoints, trips, examined } = await findChokepoints(graph, demand, {
       candidates: CHOKEPOINTS.candidates, topK: CHOKEPOINTS.topK, penalty: CHOKEPOINTS.disconnectPenaltySec, signal,
       onProgress: (what, done, total) => { if (getClosures() === closures) status(`${what}… ${done}/${total}`); }
     });
     if (signal.aborted) return;
-    results = chokepoints; shown = !!results.length; render();
-    if (shown && !$('analyzePanel').hidden && !$('panel').hidden) showChokepoints(results);
-    const scope = `${examined} links tested · ${trips} routed trips · ${fmtClosureCount(closures.length)}.`;
-    status(results.length ? scope : `${scope} No tested closure increased the score.`);
+    display(cached = { closures, chokepoints, trips, examined });
   } catch {
     if (!signal.aborted) status('Could not analyze the road network. Try finding critical roads again.');
   } finally {
@@ -62,8 +62,15 @@ async function analyze() {
   }
 }
 
+function display({ closures, chokepoints, trips, examined }) {
+  results = chokepoints; shown = !!results.length; render();
+  if (shown && !$('analyzePanel').hidden && !$('panel').hidden) showChokepoints(results);
+  const scope = `${examined} links tested · ${trips} routed trips · ${fmtClosureCount(closures.length)}.`;
+  status(results.length ? scope : `${scope} No tested closure increased the score.`);
+}
+
 export function initChokepoints() {
-  on('graph:ready', g => { base = g; $('chokeBtn').disabled = false; });
+  on('graph:ready', g => { base = g; cached = undefined; $('chokeBtn').disabled = false; });
   on('workspace:changed', mode => {
     if (mode === 'analyze' && shown) {
       $('chokeList').querySelector('[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
@@ -72,6 +79,7 @@ export function initChokepoints() {
     else clearChokepoints();
   });
   on('closures:changed', () => {
+    cached = undefined;
     if (!results.length && !controller) return;
     controller?.abort();
     results = []; shown = false; render(); clearChokepoints();

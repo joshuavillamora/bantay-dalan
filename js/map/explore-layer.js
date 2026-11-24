@@ -5,7 +5,7 @@ const colors = { explored: '#a46a13', frontier: '#a46a13', forward: '#a46a13', b
 const photoColors = { explored: '#ffc251', frontier: '#ffc251', forward: '#ffc251', backward: '#dbabff', repair: '#64e5d2' };
 const redrawEvents = 'moveend zoomend resize basemapchange';
 const ExploreLayer = L.Layer.extend({
-  initialize() { this.entries = []; },
+  initialize() { this.entries = []; this.painted = 0; },
   onAdd(m) {
     this.canvas = document.createElement('canvas');
     this.canvas.style.pointerEvents = 'none';
@@ -16,7 +16,9 @@ const ExploreLayer = L.Layer.extend({
   },
   onRemove(m) {
     cancelAnimationFrame(this.resetFrame);
+    cancelAnimationFrame(this.paintFrame);
     this.resetFrame = 0;
+    this.paintFrame = 0;
     this.canvas.remove();
     m.off(redrawEvents, this.scheduleReset, this);
   },
@@ -24,7 +26,8 @@ const ExploreLayer = L.Layer.extend({
     if (this.resetFrame) return;
     this.resetFrame = requestAnimationFrame(() => {
       this.resetFrame = 0;
-      this.reset();
+      try { this.reset(); }
+      catch (error) { this.fire('error', { error }); }
     });
   },
   reset() {
@@ -67,14 +70,43 @@ const ExploreLayer = L.Layer.extend({
   },
   add(kind, from, to) {
     const entry = [kind, from, to];
-    this.entries.push(entry); this.draw(entry); setLegend(kind, true);
+    // Keep redraws bounded on long searches. Expansion counts come from the full search.
+    if (this.entries.length === 40000) {
+      this.entries.splice(0, 10000);
+      this.painted = Math.max(0, this.painted - 10000);
+    }
+    this.entries.push(entry);
+    this.schedulePaint();
+    setLegend(kind, true);
+  },
+  schedulePaint() {
+    if (this.paintFrame || this.painted === this.entries.length) return;
+    this.paintFrame = requestAnimationFrame(() => {
+      this.paintFrame = 0;
+      const stop = performance.now() + 4;
+      const end = Math.min(this.entries.length, this.painted + 512);
+      try {
+        while (this.painted < end) {
+          this.draw(this.entries[this.painted++]);
+          if (this.painted % 32 === 0 && performance.now() >= stop) break;
+        }
+        this.schedulePaint();
+      } catch (error) {
+        this.entries = [];
+        this.painted = 0;
+        this.fire('error', { error });
+      }
+    });
   },
   redraw() {
     this.ctx.clearRect(0, 0, this.size.x, this.size.y);
-    this.entries.forEach(entry => this.draw(entry));
+    this.painted = 0;
+    this.schedulePaint();
   },
   clear() {
     this.entries = [];
+    cancelAnimationFrame(this.paintFrame);
+    this.paintFrame = 0;
     this.redraw();
     Object.keys(colors).forEach(kind => setLegend(kind, false));
   }

@@ -12,15 +12,17 @@ export const lpaReady = () => !!saved && saved.ready;
 export const lpaInfo = () => saved && { g: saved.g, s: saved.s, mode: saved.mode };
 
 function createSearch(g, s, t, mode, closures) {
-  const n = g.lat.length, radj = reverseAdjacency(g), h = heuristic(g, t, mode);
+  const n = g.lat.length, { offsets, vertices, indices } = reverseAdjacency(g), h = heuristic(g, t, mode);
   const st = { g, s, t, mode, n, ready: false,
     G: new Float64Array(n).fill(Infinity), rhs: new Float64Array(n).fill(Infinity),
     stamp: new Int32Array(n), inQ: new Uint8Array(n), heap: new TwoKeyHeap(), blocked: blockedEdges(g, closures) };
   const k2 = v => Math.min(st.G[v], st.rhs[v]), k1 = v => k2(v) + h(v);
   const bestPred = v => {   // cheapest way to arrive at v through an open road
     let best = Infinity, bp = -1;
-    for (const [p, d, sp] of radj[v]) {
+    for (let i = offsets[v]; i < offsets[v + 1]; i++) {
+      const p = vertices[i];
       if (st.blocked.has(p * n + v)) continue;
+      const [, d, sp] = g.adj[p][indices[i]];
       const c = st.G[p] + edgeCost(mode, d, sp);
       if (c < best) { best = c; bp = p; }
     }

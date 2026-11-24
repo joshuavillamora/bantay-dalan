@@ -6,7 +6,7 @@ import { edgeCost } from './common.js';
 
 export function* bidirectional(g, s, t, mode) {
   if (s === t) return [s];
-  const n = g.lat.length, adjs = [g.adj, reverseAdjacency(g)];
+  const n = g.lat.length, { offsets, vertices, indices } = reverseAdjacency(g);
   const dist = [new Float64Array(n).fill(Infinity), new Float64Array(n).fill(Infinity)];
   const prev = [new Int32Array(n).fill(-1), new Int32Array(n).fill(-1)];
   const done = [new Uint8Array(n), new Uint8Array(n)], heap = [new Heap(), new Heap()];
@@ -20,7 +20,10 @@ export function* bidirectional(g, s, t, mode) {
     done[k][u] = 1;
     if (dist[o][u] < Infinity && dist[k][u] + dist[o][u] < mu) { mu = dist[k][u] + dist[o][u]; meet = u; }
     const found = [];
-    for (const [v, d, sp] of adjs[k][u]) {
+    const end = k ? offsets[u + 1] : g.adj[u].length;
+    for (let i = k ? offsets[u] : 0; i < end; i++) {
+      const [to, d, sp] = k ? g.adj[vertices[i]][indices[i]] : g.adj[u][i];
+      const v = k ? vertices[i] : to;
       if (done[k][v]) continue;
       const nc = dist[k][u] + edgeCost(mode, d, sp);
       if (nc < dist[k][v]) { if (dist[k][v] === Infinity) found.push(v); dist[k][v] = nc; prev[k][v] = u; heap[k].push(v, nc); }

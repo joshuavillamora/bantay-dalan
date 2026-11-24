@@ -30,20 +30,50 @@ export function showPreviousRoute(points) {
   setLegend('previous', !!previous);
 }
 
-export function animateRoute(points, stillCurrent, animate = true) {
-  const hasLine = points.length > 1;
-  pathCase = L.polyline([], { color: '#fff', weight: 9, opacity: .94, interactive: false }).addTo(map);
-  pathLine = L.polyline([], { color: '#1e4ba8', weight: 5, bubblingMouseEvents: false })
-    .bindTooltip(tooltipText('Current route'), { sticky: true }).addTo(map);
-  setLegend('route', hasLine);
-  const perFrame = animate && !reducedMotion() ? Math.max(4, Math.ceil(points.length / 20)) : points.length;
-  let shown = 0;
+function drawRoute(points) {
+  pathCase = L.polyline(points, { color: '#fff', weight: 9, opacity: .94, interactive: false });
+  pathCase.addTo(map);
+  pathLine = L.polyline(points, { color: '#1e4ba8', weight: 5, bubblingMouseEvents: false })
+    .bindTooltip(tooltipText('Current route'), { sticky: true });
+  pathLine.addTo(map);
+  setLegend('route', points.length > 1);
+}
+
+export function animateRoute(points, { stillCurrent, animate, onError }) {
+  const perFrame = Math.max(4, Math.ceil(points.length / 20));
+  if (!animate || reducedMotion() || points.length <= perFrame) {
+    drawRoute(points);
+    return;
+  }
+
+  function recover(error) {
+    try {
+      clearRoute();
+      drawRoute(points);
+    } catch (fallbackError) {
+      onError(new AggregateError([error, fallbackError], 'Could not draw the route'));
+      return;
+    }
+    console.warn('Route animation failed. Drew the full route instead.', error);
+  }
+
+  let shown = perFrame;
   const draw = () => {
     if (!stillCurrent()) return;
-    shown += perFrame;
-    const segment = points.slice(0, shown);
-    pathCase.setLatLngs(segment); pathLine.setLatLngs(segment);
-    if (shown < points.length) pathRaf = requestAnimationFrame(draw);
+    try {
+      shown += perFrame;
+      const segment = points.slice(0, shown);
+      pathCase.setLatLngs(segment);
+      pathLine.setLatLngs(segment);
+      if (shown < points.length) pathRaf = requestAnimationFrame(draw);
+    } catch (error) {
+      recover(error);
+    }
   };
-  draw();
+  try {
+    drawRoute(points.slice(0, shown));
+    pathRaf = requestAnimationFrame(draw);
+  } catch (error) {
+    recover(error);
+  }
 }

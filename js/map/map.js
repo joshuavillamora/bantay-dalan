@@ -2,6 +2,7 @@
 import { MAP_CENTER, MAP_ZOOM, PLACES, DEFAULT_START, DEFAULT_END } from '../config.js';
 import { $ } from '../utils/dom.js';
 import { initBasemaps } from './basemaps.js';
+import { visitRoadSegments } from '../graph/road-spatial.js';
 
 export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 export const map = L.map('map', {
@@ -21,19 +22,38 @@ let localReady = false;
 /* The local network sits beneath the tiles so it also covers failed or offline tile requests. */
 export function showLocalRoads(g) {
   if (localReady) return;
-  const points = g.lat.map((lat, i) => [lat, g.lng[i]]);
-  const major = [], minor = [], seen = new Set(), size = points.length;
-  for (const [u, edges] of g.adj.entries()) {
-    for (const [v, , speed] of edges) {
-      const key = Math.min(u, v) * size + Math.max(u, v);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      (speed >= 35 ? major : minor).push([points[u], points[v]]);
-    }
-  }
   const options = { renderer: L.canvas({ pane: 'localRoads' }), interactive: false };
-  L.polyline(minor, { ...options, color: '#a3b2b2', weight: 1, opacity: .75 }).addTo(map);
-  L.polyline(major, { ...options, color: '#829899', weight: 2, opacity: .9 }).addTo(map);
+  const minor = L.polyline([], { ...options, color: '#a3b2b2', weight: 1, opacity: .75 }).addTo(map);
+  const major = L.polyline([], { ...options, color: '#829899', weight: 2, opacity: .9 }).addTo(map);
+  const fallbackNeeded = () => map.getContainer().classList.contains('needs-road-fallback');
+  let frame = 0, renderedBounds, renderedZoom;
+  function updateRoads() {
+    frame = 0;
+    if (!fallbackNeeded()) return;
+    const visible = map.getBounds(), zoom = map.getZoom();
+    if (zoom === renderedZoom && renderedBounds?.contains(visible)) return;
+    const b = visible.pad(.12);
+    const local = [], main = [];
+    visitRoadSegments(g, [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], (u, v, speed) => {
+      if (zoom < 11 && speed < 40) return;
+      (speed >= 35 ? main : local).push([[g.lat[u], g.lng[u]], [g.lat[v], g.lng[v]]]);
+    });
+    minor.setLatLngs(local);
+    major.setLatLngs(main);
+    renderedBounds = b; renderedZoom = zoom;
+  }
+  function scheduleRoads() {
+    if (!frame && fallbackNeeded()) frame = requestAnimationFrame(updateRoads);
+  }
+  map.on('moveend', scheduleRoads);
+  map.on('roadfallbackchange', ({ needed }) => {
+    if (needed) scheduleRoads();
+    else if (renderedBounds) {
+      minor.setLatLngs([]); major.setLatLngs([]);
+      renderedBounds = undefined;
+    }
+  });
+  scheduleRoads();
   const labels = L.layerGroup(['Molo Church', 'Iloilo Esplanade', 'Jaro Cathedral'].map(name => L.marker(PLACES[name], {
     pane: 'localRoads', interactive: false, keyboard: false,
     icon: L.divIcon({ className: 'local-place', html: tooltipText(name), iconSize: [0, 0] })

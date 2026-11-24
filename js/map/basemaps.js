@@ -15,7 +15,7 @@ export function initBasemaps(map) {
   if (!localImagery) select.title = 'Satellite and Hybrid are available on localhost for development.';
   map.attributionControl.addAttribution(osmCredit);
 
-  let active = null, pending = null, localRoads = false, notice = '', renderedPhoto = false;
+  let active = null, pending = null, localRoads = false, notice = '', renderedPhoto = false, fallback = true;
 
   function render() {
     const mode = pending?.mode || active?.mode || 'streets';
@@ -26,6 +26,12 @@ export function initBasemaps(map) {
     if (source.textContent !== status) source.textContent = status;
     const photo = !!active && active.mode !== 'streets';
     container.classList.toggle('has-basemap', !!active);
+    const needed = !active || !!active.failed.size;
+    container.classList.toggle('needs-road-fallback', needed);
+    if (fallback !== needed) {
+      fallback = needed;
+      map.fire('roadfallbackchange', { needed });
+    }
     if (renderedPhoto !== photo) {
       renderedPhoto = photo;
       container.classList.toggle('photo-basemap', photo);
@@ -36,7 +42,7 @@ export function initBasemaps(map) {
   function discard(entry) {
     if (!entry) return;
     clearTimeout(entry.timer);
-    entry.layer.off('loading tileload load');
+    entry.layer.off('loading tileload tileerror tileunload load');
     entry.layer.remove();
   }
 
@@ -92,11 +98,16 @@ export function initBasemaps(map) {
         { attribution: stadiaCredit + ' · © <a href="https://openmaptiles.org/">OpenMapTiles</a>' }]
     };
     const [label, url, options] = definitions[mode];
-    const entry = { mode, label, carto, loaded: false, layer: L.tileLayer(url, { ...base, ...options }) };
+    const entry = { mode, label, carto, loaded: false, failed: new Set(), layer: L.tileLayer(url, { ...base, ...options }) };
     pending = entry;
     entry.layer.on('loading', () => { entry.loaded = false; });
-    entry.layer.on('tileload', () => { entry.loaded = true; });
-    const settle = () => entry.loaded ? activate(entry) : unavailable(entry);
+    entry.layer.on('tileload', ({ tile }) => { entry.loaded = true; entry.failed.delete(tile); });
+    entry.layer.on('tileunload', ({ tile }) => { if (entry.failed.delete(tile) && active === entry) render(); });
+    entry.layer.on('tileerror', ({ tile }) => {
+      entry.failed.add(tile);
+      if (active === entry) render();
+    });
+    const settle = () => entry.loaded ? (active === entry ? render() : activate(entry)) : unavailable(entry);
     entry.layer.on('load', settle);
     entry.timer = setTimeout(settle, 8000);
     entry.layer.addTo(map);

@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bantay Dalan · Iloilo road network lab</title>
-<meta name="description" content="Find routes, simulate disruptions and explore pathfinding on Iloilo City's road network.">
+<title>CHOKEPOINT · Road Network Analysis &amp; Resilience</title>
+<meta name="application-name" content="CHOKEPOINT">
+<meta name="description" content="CHOKEPOINT compares routing algorithms, simulates road closures, and analyzes critical links in Iloilo's modeled road network.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect x='7' y='7' width='26' height='26' rx='4' transform='rotate(45 20 20)' fill='%23ffc83d' stroke='%231b1f24' stroke-width='2.5'/%3E%3Cpath d='M14 26c0-6 12-6 12-12' fill='none' stroke='%231b1f24' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='14' cy='26' r='2.6' fill='%231b1f24'/%3E%3Ccircle cx='26' cy='14' r='2.6' fill='%231b1f24'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,7 +21,7 @@
       <path d="M14 26c0-6 12-6 12-12" fill="none" stroke="#1b1f24" stroke-width="3" stroke-linecap="round"/>
       <circle cx="14" cy="26" r="2.6" fill="#1b1f24"/><circle cx="26" cy="14" r="2.6" fill="#1b1f24"/>
     </svg>
-    <div><h1>Bantay Dalan</h1><p>Iloilo road network lab</p></div>
+    <div><h1>CHOKEPOINT</h1><p>Road Network Analysis &amp; Resilience</p></div>
   </div>
   <div class="header-actions">
     <button id="panelToggle" type="button" class="quiet" aria-expanded="true" aria-controls="panel">Hide panel</button>
@@ -48,13 +49,18 @@
     <section class="mode-panel" id="routePanel" aria-labelledby="route-title">
       <div class="panel-body">
         <h2 id="route-title">Plan a route</h2>
-        <p class="intro">Search for a place, drag a pin, or pick an endpoint on the map.</p>
+        <p class="intro">Search for a landmark, street, or mapped address. Choose a result to set the endpoint.</p>
         <div class="trip">
           <div class="leg">
             <label for="from"><span class="point-label start" aria-hidden="true">A</span> Start</label>
             <div class="search">
-              <input id="from" type="text" placeholder="Find a starting point" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="fromList">
-              <ul id="fromList" class="suggest" role="listbox" aria-label="Start suggestions" hidden></ul>
+              <input id="from" type="text" placeholder="Find a starting point" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="fromList" aria-describedby="fromAccess">
+              <div id="fromSuggest" class="suggest" hidden>
+                <p id="fromSuggestedHeading" class="suggest-heading" hidden>Suggested places</p>
+                <ul id="fromList" role="listbox" aria-label="Start suggestions" hidden></ul>
+                <p id="fromSearchStatus" class="search-status" role="status"></p>
+              </div>
+              <p id="fromAccess" class="hint endpoint-access" role="status" hidden></p>
             </div>
           </div>
           <button id="swap" class="secondary swap" type="button" aria-label="Swap start and destination" title="Swap endpoints">
@@ -63,8 +69,13 @@
           <div class="leg">
             <label for="to"><span class="point-label end" aria-hidden="true">B</span> Destination</label>
             <div class="search">
-              <input id="to" type="text" placeholder="Find a destination" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="toList">
-              <ul id="toList" class="suggest" role="listbox" aria-label="Destination suggestions" hidden></ul>
+              <input id="to" type="text" placeholder="Find a destination" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="toList" aria-describedby="toAccess">
+              <div id="toSuggest" class="suggest" hidden>
+                <p id="toSuggestedHeading" class="suggest-heading" hidden>Suggested places</p>
+                <ul id="toList" role="listbox" aria-label="Destination suggestions" hidden></ul>
+                <p id="toSearchStatus" class="search-status" role="status"></p>
+              </div>
+              <p id="toAccess" class="hint endpoint-access" role="status" hidden></p>
             </div>
           </div>
         </div>
@@ -73,6 +84,7 @@
           <button id="pickEnd" type="button" class="secondary" aria-pressed="false">Pick B</button>
           <button id="gps" type="button" class="quiet">Use my location</button>
         </div>
+        <p class="search-credit">Online search by <a id="searchProvider" href="https://photon.komoot.io/" target="_blank" rel="noopener noreferrer">Photon</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a></p>
         <div class="field">
           <h3>Optimize for</h3>
           <div class="seg" role="group" aria-label="Optimize for">
@@ -140,7 +152,7 @@
         <div class="tools"><button id="visualize" class="secondary" type="button" disabled>Visualize search</button></div>
         <section class="inset" aria-labelledby="comparison-title">
           <h3 id="comparison-title">Fresh search results</h3>
-          <p id="comparisonStatus" class="hint" role="status">Run a comparison to check route costs and expanded vertices against Dijkstra.</p>
+          <p id="comparisonStatus" class="hint" role="status">Run a comparison to check route costs and count processed search events.</p>
           <div id="resBox" hidden>
             <div id="res" class="table-wrap" role="region" aria-label="Fresh algorithm comparison" tabindex="0"></div>
             <p class="hint">One run per algorithm. Compute time excludes animation and shared graph preparation. Runtime varies by device.</p>
@@ -188,7 +200,7 @@
       <button id="wheelMode" type="button" class="quiet" aria-label="Zoom with the scroll wheel" aria-pressed="false" title="Scroll pans the map. Hold Ctrl while scrolling to zoom.">Scroll pans</button>
       <section id="playback" aria-label="Search playback" hidden>
         <div class="playback-info">
-          <span><b id="sN">0</b> expanded</span><span><b id="sQ">0</b> queue entries</span>
+          <span><b id="sN">0</b> processed</span><span><b id="sQ">0</b> queue entries</span>
           <label for="spd">Animation speed</label><input id="spd" type="range" min="0" max="100" value="60">
         </div>
         <div class="playback-actions">
@@ -203,8 +215,8 @@
 </div>
 
 <dialog id="welcome" aria-labelledby="wTitle">
-  <h2 id="wTitle">Explore Iloilo’s road network</h2>
-  <p>Start with Plaza Libertad and SM City Iloilo, or choose different locations.</p>
+  <h2 id="wTitle">CHOKEPOINT</h2>
+  <p>Explore Iloilo’s modeled road network. Start with Plaza Libertad and SM City Iloilo, or choose different locations.</p>
   <ul>
     <li><b>Route</b> finds a path using modeled road distance or fixed road speeds.</li>
     <li><b>Disrupt</b> lets you simulate closures and measure how the trip changes.</li>
@@ -214,7 +226,7 @@
   <p>Drag to pan. On touchscreens, pinch to zoom. Over the map, scroll to pan or hold Ctrl while scrolling to zoom. Use the scroll control to switch its default action. If a trackpad pinch is handled by the browser, use the map’s + and − controls.</p>
   <p>Use the map style menu for Streets, Satellite, or Hybrid. The two photo styles use Stadia’s localhost access. Select an A or B pin to open a nearby Google Street View, where available.</p>
   <form method="dialog"><button id="wGo" class="primary" type="submit" autofocus>Back to the map</button></form>
-  <p class="dialog-credit">DALAN-B · Beyond the Route · CC 204</p>
+  <p class="dialog-credit">CC 204 · Data Structures and Algorithms</p>
 </dialog>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script type="module" src="js/main.js"></script>
