@@ -250,7 +250,8 @@ th, td { padding: var(--space-2); border-bottom: 1px solid var(--line); vertical
 thead { background: var(--neutral-tint); }
 thead th { font-weight: 600; }
 tbody th { font-weight: 500; }
-#res th:first-child { width: 42%; }
+#res th:first-child { width: 34%; }
+#res :is(th, td) { padding-inline: var(--space-1); }
 #res thead .num { white-space: normal; }
 .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 abbr[title] { text-decoration: none; }
@@ -263,6 +264,8 @@ table small { color: var(--muted); display: block; }
 .comparison-success { color: var(--teal); }
 #comparisonContext:empty { display: none; }
 #comparisonStatus { margin-top: var(--space-1); }
+#compareReplay { margin-top: var(--space-2); width: 100%; }
+.algorithm-swatch { display: inline-block; width: .8em; height: .8em; border-radius: 2px; border: 1px solid #28334445; margin-right: .38em; flex: none; }
 .comparison-effort { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); padding-top: var(--space-1); }
 .comparison-effort:empty { display: none; }
 .comparison-effort > span { display: grid; gap: 2px; min-width: 0; }
@@ -274,6 +277,43 @@ table small { color: var(--muted); display: block; }
 /* Map controls, labels and playback */
 .map-workspace { grid-area: map; display: grid; grid-template-rows: minmax(0, 1fr) auto auto; min-height: 0; min-width: 0; background: #e9eeee; }
 .map-stage { grid-row: 1; position: relative; min-height: 0; isolation: isolate; }
+#comparisonMaps { position: absolute; z-index: 2; inset: 0; display: grid; grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr));
+  gap: 2px; padding-top: 94px; background: #eeede8; }
+.comparison-tile { position: relative; min-width: 0; min-height: 0; }
+.comparison-leaflet { height: 100%; background: #e7edeb; }
+.comparison-tile h3 { position: absolute; z-index: 450; top: 7px; left: 7px; max-width: calc(100% - 55px);
+  padding: 4px 7px; border-left: 3px solid; background: #fffffff0; border-radius: 3px; font-size: var(--text-xs); pointer-events: none; }
+.comparison-tile.trace-disabled h3 { opacity: .65; }
+.comparison-trace { pointer-events: none; }
+#map.comparison-active :is(.search-traces, .interactive-route, .leaflet-previousRoute-pane),
+.map-stage:has(#map.hide-network-search) .comparison-trace,
+.map-stage:has(#map.hide-network-closures) .comparison-closures { visibility: hidden; }
+#map.comparison-split { visibility: hidden; }
+.map-stage:has(#map.comparison-active) + .map-legend :is(.trace-legend, .legend-route, .legend-previous) { display: none; }
+#comparisonPlayback { width: 100%; display: grid; gap: 6px; font-size: var(--text-xs); }
+.map-footer:has(#comparisonPlayback:not([hidden])) > :is(.map-status, #playback) { display: none; }
+.compare-controls, .compare-timeline, .compare-legend-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 9px; }
+.compare-controls label, .compare-timeline label, .compare-legend-actions label { display: flex; align-items: center; gap: 4px; }
+.compare-controls select { width: auto; height: 34px; }
+.compare-controls button, .compare-timeline button { min-height: 34px; }
+.compare-timeline label { flex: 1 1 150px; }
+.compare-timeline input { flex: 1; width: 70px; accent-color: var(--blue); }
+.compare-legend-actions button { min-height: 30px; padding: 4px 7px; }
+.compare-legend-actions input { accent-color: var(--blue); }
+#compareOpacity { width: 75px; }
+#compareOpacityValue { min-width: 4ch; font-variant-numeric: tabular-nums; }
+#comparisonTracks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 10px; row-gap: 2px; }
+#comparisonTracks label { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 4px; min-width: 0; }
+#comparisonTracks input { accent-color: var(--blue); }
+#comparisonTracks output { font-variant-numeric: tabular-nums; color: var(--muted); }
+.compare-key .swatch { margin-left: 3px; width: 12px; --swatch: #253449; }
+.compare-key .dashed { --swatch: #d7263d; }
+@media (max-width: 690px) {
+  #comparisonPlayback { max-height: 28dvh; overflow-y: auto; overscroll-behavior: contain; }
+  #comparisonTracks { grid-template-columns: minmax(0, 1fr); }
+  .compare-controls select, .compare-controls button, .compare-timeline button, .compare-legend-actions button { min-height: 44px; }
+  .workspace:not(.panel-hidden):has(#comparisonPlayback:not([hidden])) { grid-template-rows: auto minmax(0, 1fr) minmax(0, 26dvh); }
+}
 #map { width: 100%; height: 100%; background: #e7edeb; overscroll-behavior: contain; }
 #map:focus-visible { outline-offset: -3px; }
 #map.drawing, #map.picking { cursor: crosshair; }

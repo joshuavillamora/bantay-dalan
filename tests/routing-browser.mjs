@@ -19,7 +19,7 @@ const chrome = process.env.CHROME_BIN || (process.platform === 'darwin'
 const browser = spawn(chrome, [
   '--headless', '--no-first-run', '--disable-background-networking', '--remote-debugging-port=0',
   `--user-data-dir=${temp}`, 'about:blank'
-]);
+], { stdio: ['ignore', 'ignore', 'pipe'] });
 let ws, stderr = '', launchError;
 browser.on('error', error => { launchError = error; });
 browser.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
@@ -419,13 +419,118 @@ try {
   assert.match(await compare(), /All optimized costs agree/);
   assert.equal(await page(() => $('comparisonContext').textContent), 'Estimated fastest · 0 closures');
   assert.deepEqual(await page(() => [...$('res').querySelectorAll('tbody th abbr')].map(node => node.textContent)),
-    ['Bidirectional Dijkstra', 'A*', 'LPA*', 'Standard Dijkstra']);
+    ['Bidirectional Dijkstra', 'A*', 'LPA*', 'Dijkstra']);
   assert.deepEqual(await page(() => [$('sD').textContent, $('sT').textContent, $('sharedDistance').textContent, $('sharedTime').textContent]),
     ['5.36 km', '6.61 min', '5.36 km', '6.61 min']);
   await assertGeistGlyphs(['#sharedDistance', '#res tbody .num']);
-  assert.deepEqual(await page(() => [...$('res').querySelectorAll('tbody tr')].map(row => row.children[1].textContent)),
+  assert.deepEqual(await page(() => [...$('res').querySelectorAll('tbody tr')].map(row => row.children[1].firstChild.textContent)),
     ['4,939', '5,548', '5,548', '8,730']);
+  assert.deepEqual(await page(() => [...$('res').querySelectorAll('tbody tr')].map(row => row.cells[2].textContent)),
+    ['4,939', '5,548', '5,548', '8,730']);
+  assert.deepEqual(await page(() => [...$('res').querySelectorAll('thead th')].map(cell => cell.textContent)),
+    ['Algorithm', 'Search events', 'Unique Nodes Explored', 'Compute time']);
+  assert.match(await page(() => $('res').querySelector('[aria-describedby="uniqueNodesHelp"]').title), /repeat processing.*discovered or queued/);
+  assert.match(await page(() => $('res').querySelector('tbody tr').children[1].textContent), /Forward 2,198Backward 2,741/);
   assert.ok(await allCostsAgree());
+  await click('compareReplay');
+  assert.equal(await page(() => $('compareLayout').value), 'split');
+  const splitSignature = () => page(() => [...$('comparisonMaps').querySelectorAll('.comparison-leaflet')].map(view => {
+    const bounds = view.getBoundingClientRect();
+    return [...view.querySelectorAll('.leaflet-marker-icon')].map(pin => {
+      const point = pin.getBoundingClientRect();
+      return [Math.round(point.x - bounds.x), Math.round(point.y - bounds.y)];
+    }).toString();
+  }));
+  const splitBefore = await splitSignature();
+  assert.equal(splitBefore.length, 4);
+  assert.equal(new Set(splitBefore).size, 1);
+  await page(() => $('comparisonMaps').querySelector('.leaflet-control-zoom-in').click());
+  await waitFor(async () => {
+    const views = await splitSignature();
+    return new Set(views).size === 1 && views[0] !== splitBefore[0];
+  }, 'synchronized split map zoom');
+  await page(() => $('comparisonMaps').querySelector('.leaflet-control-zoom-out').click());
+  await click('compareStep');
+  assert.equal(await page(() => $('comparisonTracks').querySelector('output').textContent),
+    '1 / 4,939 events · forward 1 · backward 0 · 1 / 4,939 unique nodes');
+  const replayControl = (id, value, event = 'change') => page((id, value, event) => {
+    $(id).value = value;
+    $(id).dispatchEvent(new Event(event));
+  }, id, value, event);
+  await replayControl('compareSync', 'progress');
+  await replayControl('compareTimeline', '4365', 'input');
+  assert.match(await page(() => $('comparisonTracks').querySelector('output').textContent),
+    /^2,469 \/ 4,939 events .*2,469 \/ 4,939 unique nodes$/);
+  await replayControl('compareTimeline', '8730', 'input');
+  await waitFor(() => page(() => $('compareReplayStatus').textContent === 'Playback complete'), 'complete split replay');
+  const fourMapsWith = selector => page(selector => {
+    const views = [...$('comparisonMaps').querySelectorAll('.comparison-leaflet')];
+    return views.length === 4 && views.every(view => view.querySelector(selector));
+  }, selector);
+  if (offline) {
+    await waitFor(() => fourMapsWith('.leaflet-offlineTiles-pane .leaflet-tile-loaded'), 'four offline split backgrounds');
+  } else {
+    await waitFor(() => fourMapsWith('.leaflet-tile-pane img.leaflet-tile-loaded'), 'four streets split backgrounds');
+    for (const style of ['satellite', 'hybrid']) {
+      await mapStyle(style);
+      await waitFor(() => fourMapsWith(`.leaflet-tile-pane img.leaflet-tile-loaded[src*="${style === 'satellite' ? '/data/imagery/' : '/alidade_satellite/'}"]`),
+        'four ' + style + ' split backgrounds', 16000);
+    }
+    await mapStyle('streets');
+  }
+  await captureView('compared-split');
+  await mapStyle('network');
+  await waitFor(() => fourMapsWith('.network-graph[data-ready="true"]'), 'four network split backgrounds');
+  await mapStyle(offline ? 'offline' : 'streets');
+  const drawStarted = performance.now();
+  await replayControl('compareLayout', 'overlay');
+  await waitFor(() => page(() => $('compareReplayStatus').textContent === 'Playback complete'), 'all overlay traces rendered');
+  const overlayPaintMs = Math.round(performance.now() - drawStarted);
+  assert.deepEqual(await page(() => Object.values(ALGORITHMS).map(({ color, backward }) => [color, backward ?? null])),
+    [['#2563EB', '#06B6D4'], ['#D9A400', null], ['#9333EA', null], ['#64748B', null]]);
+  assert.equal(await page(() => $('comparisonMaps').hidden && document.querySelectorAll('#map canvas.comparison-trace').length === 5), true);
+  assert.deepEqual(await page(() => {
+    const canvas = $('map').querySelector('canvas[data-search-track="bidir"]');
+    const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+    let forward = false, backward = false;
+    for (let i = 0; i < data.length && !(forward && backward); i += 4) {
+      if (data[i + 3] < 200) continue;
+      forward ||= Math.abs(data[i] - 37) < 15 && Math.abs(data[i + 1] - 99) < 15 && Math.abs(data[i + 2] - 235) < 15;
+      backward ||= Math.abs(data[i] - 6) < 15 && Math.abs(data[i + 1] - 182) < 15 && Math.abs(data[i + 2] - 212) < 15;
+    }
+    return [forward, backward];
+  }), [true, true]);
+  await page(() => { window.overlayBaseline = $('map').querySelector('canvas[data-search-track="dijkstra"]'); });
+  await click('compareHideAll');
+  assert.equal(await page(() => $('map').querySelectorAll('canvas[data-search-track]:not([data-search-track="frontier"]):not([hidden])').length), 0);
+  assert.ok(await page(() => map.getPane('comparisonRoutes').querySelector('path')));
+  await click('compareShowAll');
+  await page(() => $('comparisonTracks').querySelector('[data-track="astar"] input').click());
+  assert.equal(await page(() => $('map').querySelector('canvas[data-search-track="astar"]').hidden), true);
+  await replayControl('compareOpacity', '40', 'input');
+  assert.equal(await page(() => overlayBaseline === $('map').querySelector('canvas[data-search-track="dijkstra"]') &&
+    getComputedStyle(overlayBaseline).opacity === '0.4' && !overlayBaseline.hidden), true);
+  await click('compareRoutes');
+  assert.equal(await page(() => map.getPane('comparisonRoutes').querySelectorAll('path').length), 0);
+  await click('compareRoutes');
+  assert.ok(await page(() => map.getPane('comparisonRoutes').querySelector('path')));
+  await replayControl('compareOpacity', '100', 'input');
+  await replayControl('compareLayout', 'split');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await waitFor(() => page(() => $('compareLayout').value === 'overlay' && $('comparisonMaps').hidden), 'narrow viewport overlay');
+  assert.equal(await page(() => document.documentElement.scrollWidth === innerWidth && $('map').clientHeight > 80), true);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await replayControl('compareLayout', 'focus');
+  await replayControl('compareFocus', 'lpa');
+  await click('compareRestart');
+  assert.equal(await page(() => $('compareTimeline').value), '0');
+  await click('comparePlay');
+  await waitFor(() => page(() => Number($('compareTimeline').value) > 3), 'recorded event playback');
+  await click('comparePlay');
+  assert.equal(await page(() => $('comparePlay').textContent), 'Play');
+  await click('compareExit');
+  assert.equal(await page(() => $('comparisonPlayback').hidden && $('comparisonMaps').children.length === 0), true);
+  console.log('Comparative replay passed: synchronized split zoom, equal-event step, normalized scrub, overlay visibility, opacity, routes, focus, and teardown', { overlayPaintMs });
   await page(() => {
     openWorkspace('route');
     openWorkspace('compare');
@@ -465,6 +570,8 @@ try {
   }
   assert.deepEqual(await page(() => [state.names.s, state.names.e, state.mode]), [demo.start, demo.end, demo.mode]);
   assert.equal(await page(() => $('sN').textContent), '5,548');
+  const initialLpa = 'LPA* initial search · 5,548 search events · 5,548 unique nodes explored';
+  assert.equal(await page(() => $('initialLpaResult').textContent), initialLpa);
   await page(({ center, zoom }) => {
     openWorkspace('disrupt');
     map.setView(center, zoom, { animate: false });
@@ -499,7 +606,10 @@ try {
   });
   assert.ok(detourRoads.includes('Donato Pison Avenue') && detourRoads.includes('Pison Avenue'));
   const repair = await page(() => $('repairResult').textContent);
-  assert.match(repair, /^6,180 search events .*Reused search state/);
+  assert.match(repair, /^6,180 search events · 6,108 unique nodes explored .*Reused search state/);
+  assert.ok(await page(() => exploreLayer.retained.vertices.length > 0 &&
+    exploreLayer.entries.some(([kind]) => kind === 'repair') &&
+    !!map.getPane('previousRoute').querySelector('path[stroke-dasharray]')));
   assert.ok(Math.abs(detour.time - 571.8404680848702) < 1e-6);
   assert.deepEqual(await page(async () => {
     const n = (await loadGraph()).lat.length;
@@ -520,13 +630,35 @@ try {
   const freshLpa = await page(() => [...document.querySelectorAll('#res tbody tr')]
     .find(row => row.firstElementChild.textContent.includes('LPA*')).children[1].textContent);
   assert.equal(freshLpa, '11,524');
-  assert.match(await page(() => $('repairComparison').textContent), /11,524 events.*46.4% fewer events.*Both costs match Dijkstra/);
+  assert.match(await page(() => $('repairComparison').textContent), /11,524 search events · 11,524 unique nodes explored.*46.4% fewer events.*Both costs match Dijkstra/);
+  assert.equal(await page(() => $('initialLpaResult').textContent), initialLpa);
+  await click('compareReplay');
+  await replayControl('compareLayout', 'overlay');
+  assert.ok(await page(() => !$('comparisonTracks').querySelector('[data-track="repair"]').hidden &&
+    !$('comparisonTracks').querySelector('[data-track="repair"] input').checked));
+  await page(() => $('comparisonTracks').querySelector('[data-track="repair"] input').click());
+  const lpaReplayTotals = () => page(() => ['lpa', 'repair'].map(key => $('comparisonTracks').querySelector(`[data-track="${key}"] output`).textContent));
+  assert.deepEqual(await lpaReplayTotals(), [
+    '0 / 11,524 events · 0 / 11,524 unique nodes', '0 / 6,180 events · 0 / 6,108 unique nodes'
+  ]);
+  await replayControl('compareTimeline', await page(() => $('compareTimeline').max), 'input');
+  await waitFor(() => page(() => $('compareReplayStatus').textContent === 'Playback complete'), 'fresh and repair on one overlay');
+  assert.deepEqual(await lpaReplayTotals(), [
+    '11,524 / 11,524 events · 11,524 / 11,524 unique nodes', '6,180 / 6,180 events · 6,108 / 6,108 unique nodes'
+  ]);
+  assert.equal(await page(() => !document.querySelector('#map canvas[data-search-track="repair"]').hidden &&
+    !!map.getPane('comparisonRoutes').querySelector('.comparison-reference[stroke-dasharray]') &&
+    getComputedStyle(map.getPane('closures')).visibility === 'visible' &&
+    closureLayers().some(layer => layer.getLatLngs().length) && getClosures().length === 1), true);
+  await captureView('matched-repair-overlay');
+  await click('compareExit');
   await captureView('compare');
   await page(() => { $('repairComparison').scrollIntoView({ block: 'nearest' }); });
   await captureView('compare-repair');
   await page(() => openWorkspace('disrupt'));
   await click('closeUndo');
   await result('Route updated');
+  assert.equal(await page(() => $('compareReplay').hidden), true);
   assert.ok(Math.abs((await verifyRoute()).time - original.time) < 1e-6);
   await page(() => openWorkspace('analyze'));
   const analyzeStarted = performance.now();
@@ -1420,10 +1552,10 @@ try {
       const { renderResults } = await import('/js/ui/results-table.js');
       const rows = ['bidir', 'astar', 'lpa', 'dijkstra'].map((key, index) => ({
         key, name: ALGORITHMS[key].name, baseline: key === 'dijkstra', matches: key !== 'dijkstra',
-        path: [0, 1], dist: 5000 + (index === 1 ? 50 : 0), time: 400, count: 10 + index, ms: 1
+        path: [0, 1], dist: 5000 + (index === 1 ? 50 : 0), time: 400, count: 10 + index, uniqueNodes: 10, ms: 1
       }));
       renderResults(rows);
-      if (!$('sharedTotals').hidden || $('res').querySelector('tbody tr').children.length !== 4) {
+      if (!$('sharedTotals').hidden || $('res').querySelector('tbody tr').cells.length !== 5) {
         throw Error('Distinct route distances must remain visible');
       }
       rows[1].path = null; rows[1].matches = false; rows[1].verdict = 'Unreachable · differs';
@@ -1432,7 +1564,7 @@ try {
       for (const row of rows) { row.path = [0, 1]; row.dist = 5000; row.matches = !row.baseline; row.count = 10; }
       renderResults(rows);
       for (const result of $('comparisonEffort').querySelectorAll('strong')) {
-        if (result.textContent !== 'Bidirectional Dijkstra, A*, LPA*, Standard Dijkstra') throw Error('All tied observations must remain visible');
+        if (result.textContent !== 'Bidirectional Dijkstra, A*, LPA*, Dijkstra') throw Error('All tied observations must remain visible');
       }
     });
     console.log('Responsive geometry, keyboard Help, presentation view, and independent route totals passed');
@@ -1518,5 +1650,7 @@ try {
     browser.kill('SIGTERM');
     await once(browser, 'exit');
   }
+  // Chrome helpers can retain the diagnostic pipe after the browser exits.
+  browser.stderr.destroy();
   await rm(temp, { recursive: true, force: true, maxRetries: 3 });
 }

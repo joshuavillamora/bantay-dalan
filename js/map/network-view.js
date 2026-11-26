@@ -13,19 +13,20 @@ function arrow(path, a, b, fraction, length) {
   path.lineTo(x - dx * 6 - dy * 3, y - dy * 6 + dx * 3);
 }
 
-export function initNetworkView(map) {
+export function initNetworkView(map, { controls = $('networkLayers'), layers = controls, fallback = false } = {}) {
   const pane = map.createPane('networkGraph');
   pane.style.zIndex = '196';
   const container = map.getContainer();
-  const controls = $('networkLayers');
-  const inputs = [...controls.querySelectorAll('input')];
-  const enabled = Object.fromEntries(inputs.map(input => [input.dataset.layer, input.checked]));
+  const inputs = [...(layers?.querySelectorAll('input') ?? [])];
+  const enabled = { edges: true, search: true, closures: true, critical: true };
+  for (const input of inputs) enabled[input.dataset.layer] = input.checked;
   const canvas = document.createElement('canvas');
   canvas.className = 'network-graph leaflet-zoom-hide';
   canvas.setAttribute('aria-hidden', 'true');
   const ctx = canvas.getContext('2d');
   let graph, frame;
-  const isActive = () => container.classList.contains('network-basemap');
+  const isActive = () => container.classList.contains('network-basemap') ||
+    (fallback && container.classList.contains('needs-road-fallback'));
 
   function paint() {
     frame = 0;
@@ -113,29 +114,37 @@ export function initNetworkView(map) {
   function stop() { cancelAnimationFrame(frame); }
   function update() {
     const active = isActive(), zoom = map.getZoom();
-    controls.hidden = !active;
-    $('networkZoom').textContent = zoom < 12 ? 'Zoom in for local roads, vertices and directions.'
+    if (controls) {
+      controls.hidden = !active;
+      $('networkZoom').textContent = zoom < 12 ? 'Zoom in for local roads, vertices and directions.'
       : zoom < vertexZoom ? 'Zoom in for vertices and directions.'
       : zoom < directionZoom ? 'Zoom in for directions.' : 'Arrows show permitted travel on visible segments.';
-    for (const key of ['search', 'closures', 'critical']) {
-      container.classList.toggle('hide-network-' + key, active && !enabled[key]);
+      for (const key of ['search', 'closures', 'critical']) {
+        container.classList.toggle('hide-network-' + key, active && !enabled[key]);
+      }
     }
     if (active) {
       if (!canvas.isConnected) pane.append(canvas);
       schedule();
     } else {
       stop();
-      controls.open = false;
+      if (controls) controls.open = false;
       canvas.remove();
       canvas.width = canvas.height = 0;
     }
   }
-  for (const input of inputs) input.addEventListener('change', () => {
-    enabled[input.dataset.layer] = input.checked;
+  const changed = ({ currentTarget }) => {
+    enabled[currentTarget.dataset.layer] = currentTarget.checked;
     update();
-  });
+  };
+  for (const input of inputs) input.addEventListener('change', changed);
   map.on('movestart zoomstart', stop);
   map.on('moveend resize basemapchange', update);
+  if (fallback) map.on('roadfallbackchange', update);
+  map.once('unload', () => {
+    stop();
+    for (const input of inputs) input.removeEventListener('change', changed);
+  });
   update();
   return next => {
     graph = next;

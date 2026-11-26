@@ -5,6 +5,7 @@ import { on } from '../events.js';
 import { initBasemaps } from './basemaps.js';
 import { initNetworkView } from './network-view.js';
 import { roadSpatialIndex, visitRoadSegments } from '../graph/road-spatial.js';
+import { ALGORITHMS, REPAIR_SEARCH_STYLE, RETAINED_SEARCH_COLOR } from '../algorithms/index.js';
 
 export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 export const map = L.map('map', {
@@ -25,7 +26,7 @@ map.createPane('previousRoute').style.zIndex = '395';
 map.createPane('closures').style.zIndex = '420';
 map.createPane('criticalRoads').style.zIndex = '425';
 map.createPane('closurePreview').style.zIndex = '430';
-const markLocalRoadsReady = initBasemaps(map);
+const { setLocalBounds: markLocalRoadsReady } = initBasemaps(map);
 const updateNetworkGraph = initNetworkView(map);
 let removeLocalRoads;
 
@@ -161,17 +162,19 @@ const legendEntries = {
   start: ['Start A', 'point-a'],
   destination: ['Destination B', 'point-b'],
   route: ['Current route', '#1e4ba8'],
-  previous: ['Original route (reference)', '#626b75', 'dashed'],
+  previous: ['Previous route (reference)', '#626b75', 'dashed'],
   closures: ['Closed road', '#d7263d', 'dashed'],
-  explored: ['Explored', '#a46a13'],
-  frontier: ['Discovered', '#a46a13', 'dotted'],
-  forward: ['Forward search', '#a46a13'],
-  backward: ['Backward search', '#7a3fb5', 'dashed'],
-  repair: ['LPA* repair updates', '#0e9f8e', 'dotted'],
+  ...Object.fromEntries(Object.entries(ALGORITHMS).filter(([key]) => key !== 'bidir').map(([key, algo]) =>
+    [key, [`${algo.name} · processed`, algo.color]])),
+  frontier: ['Frontier discoveries', '#64748b', 'dotted'],
+  forward: ['Bidirectional Dijkstra · forward', ALGORITHMS.bidir.color],
+  backward: ['Bidirectional Dijkstra · backward', ALGORITHMS.bidir.backward, 'dashed'],
+  repair: ['LPA* · repair events', REPAIR_SEARCH_STYLE.color, 'dotted'],
+  retained: ['LPA* · retained settled labels', RETAINED_SEARCH_COLOR, 'dotted'],
   chokepoints: ['Ranked road link', '#694897', 'dashed']
 };
 const active = new Set();
-const traces = new Set(['explored', 'frontier', 'forward', 'backward', 'repair']);
+const traces = new Set(['astar', 'lpa', 'dijkstra', 'frontier', 'forward', 'backward', 'repair', 'retained']);
 export function setLegend(key, visible) {
   if (active.has(key) === visible) return;
   if (visible) active.add(key); else active.delete(key);

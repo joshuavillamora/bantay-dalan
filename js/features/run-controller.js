@@ -1,20 +1,21 @@
 /* Own the current search, playback, and before/after route snapshots. */
 import { state } from '../state.js';
-import { on } from '../events.js';
+import { emit, on } from '../events.js';
 import { $, setMessage } from '../utils/dom.js';
 import { ALGORITHMS } from '../algorithms/index.js';
-import { lpaReady, lpaReset, lpaRepair } from '../algorithms/lpa-star.js';
+import { lpaReady, lpaReset, lpaRepair, lpaSettledLabels, lpaRetainedVertices } from '../algorithms/lpa-star.js';
 import { prepareReverseAdjacency, snapRouteEndpoints, snapRoutePoint, routeMetrics } from '../graph/road-graph.js';
 import { blockedEdges } from '../graph/closure-filter.js';
 import { fitTrip } from '../map/map.js';
 import { exploreLayer } from '../map/explore-layer.js';
 import { showHead, moveHead, hideHead, clearRoute, animateRoute, showPreviousRoute } from '../map/route-view.js';
 import { refreshControls, setStatus, setCounts, showPlayback, renderRoute, renderImpact, samePath } from '../ui/dashboard.js';
-import { renderRepair } from '../ui/results-table.js';
+import { renderInitialLpa, renderRepair } from '../ui/results-table.js';
 import { getClosures, getRoutingGraph } from './closures.js';
 import { selectedAlgorithm } from './algorithm-panel.js';
 import { connectionMessage, noRouteMessage } from './route-status.js';
 import { cancelRegionLoad, currentTripGraph, prepareTripRegion } from './routing-region.js';
+import { createSearchTrace } from './search-trace.js';
 
 let base, searchView;
 const stepsPerFrame = () => Math.pow(10, (+$('spd').value - 25) / 25);
@@ -46,23 +47,24 @@ function invalidate(note) {
   const outdated = state.run && note;
   cancelRun(); clearSearch(); clearRoute(); showPreviousRoute(null);
   state.route = state.original = null;
-  lpaReset(); renderRepair(null);
+  lpaReset(); renderInitialLpa(); renderRepair(null);
   renderRoute(null, note);
   renderImpact(null, null, getClosures());
   setMessage();
   if (base) setStatus(outdated ? 'Outdated route calculation discarded' : note ? 'Route needs an update' : 'Ready to route');
 }
 
-function startRun({ visual = false, changed = false, repair = false } = {}) {
+function startRun({ visual = false, changed = false, repair = false, animate = visual } = {}) {
   if (!base) return;
   const prior = changed ? null : state.route || state.run?.prior;
+  const previousRepairRoute = repair ? state.route?.points : null;
   cancelRun(); setMessage(); clearRoute();
-  if (!repair) { clearSearch(); lpaReset(); renderRepair(null); }
-  else { setCounts(0); renderRepair(null); }
+  clearSearch(); renderRepair(null);
+  if (!repair) { lpaReset(); renderInitialLpa(); }
   state.route = null;
 
   const closures = getClosures();
-  try { showPreviousRoute(state.original?.points); }
+  try { showPreviousRoute(repair ? previousRepairRoute : state.original?.points); }
   catch (error) { console.error('Original route visualization failed', error); }
   renderRoute(null, 'Calculating the current route…');
   renderImpact(null, state.original, closures, changed);
@@ -78,9 +80,13 @@ function startRun({ visual = false, changed = false, repair = false } = {}) {
   }
 
   const key = selectedAlgorithm(), algo = ALGORITHMS[key], mode = state.mode;
-  const animate = visual;
-  const run = { id: state.runId, name: algo.name, s, t, mode, closures, changed, repair, visual, animate, prior,
-    usesClosureKeys: algo.handlesClosures, count: 0, acc: 0, ms: 0 };
+  const run = { id: state.runId, key, name: algo.name, s, t, mode, closures, changed, repair, visual, animate, prior, previousRepairRoute,
+    usesClosureKeys: algo.handlesClosures, count: 0, backward: 0, acc: 0, ms: 0 };
+  if (key === 'lpa') run.trace = createSearchTrace();
+  if (repair) {
+    run.priorLabels = lpaSettledLabels();
+    run.processed = new Uint8Array(base.lat.length);
+  }
   const start = performance.now();
   try {
     run.graph = algo.handlesClosures ? base : getRoutingGraph();
@@ -154,7 +160,7 @@ function frame() {
 }
 
 function advance(limit, paint = true, deadline = Infinity) {
-  const run = state.run, render = run.visual && paint && !run.viewFailed;
+  const run = state.run, render = run.visual && (paint || run.repair) && !run.viewFailed;
   const begin = performance.now(), events = [];
   let result, last, route;
   try {
@@ -163,12 +169,17 @@ function advance(limit, paint = true, deadline = Infinity) {
       result = run.it.next();
       if (result.done) break;
       run.count++; last = result.value;
-      if (render) {
-        if (events.length === 8000) events.splice(0, 4000);
+      if (last.direction === 'backward') run.backward++;
+      if (render || run.trace) {
+        if (!run.trace && events.length === 8000) events.splice(0, 4000);
         events.push(last);
       }
     }
     run.ms += performance.now() - begin;
+    run.trace?.record(events);
+    if (run.repair) {
+      for (const { u } of events) run.processed[u] = 1;
+    }
     if (result?.done) route = routeResult(run, result.value);
   } catch (error) {
     failedRun(error);
@@ -178,12 +189,13 @@ function advance(limit, paint = true, deadline = Infinity) {
   if (render) {
     try {
       const g = run.graph, point = i => [g.lat[i], g.lng[i]];
-      for (const { u, p, found, direction } of events) {
-        const kind = direction || 'explored';
+      const drawn = run.trace && !run.repair && events.length > 8000 ? events.slice(-8000) : events;
+      for (const { u, p, found, direction } of drawn) {
+        const kind = direction || run.key;
         if (run.repair) exploreLayer.add('repair', point(u));
         else {
-          for (const v of found) exploreLayer.add(direction || 'frontier', point(v));
-          if (p >= 0) exploreLayer.add(kind, point(p), point(u));
+          for (const v of found) exploreLayer.add(kind, point(v), undefined, true);
+          exploreLayer.add(kind, p >= 0 ? point(p) : point(u), p >= 0 ? point(u) : undefined);
         }
       }
       if (last) moveHead(g, last.u);
@@ -191,7 +203,7 @@ function advance(limit, paint = true, deadline = Infinity) {
       failedSearchView(error);
     }
   }
-  if (last && run.visual) setCounts(run.count, last.q);
+  if (last && run.visual) setCounts(run.count, last.q, run.key === 'bidir' ? run.backward : undefined);
   if (route) finish(run, route);
 }
 
@@ -206,10 +218,17 @@ function routeResult(run, path) {
 function finish(run, route) {
   state.run = null; state.paused = false; refreshControls();
   state.route = route;
+  const trace = run.trace;
+  run.trace = null;
   if (run.repair) {
     const { graph, s, t, mode, closures, count, ms } = run;
-    renderRepair({ context: { graph, s, t, mode, closures }, count, ms, path: route.path, dist: route.dist, time: route.time });
-  }
+    const retained = run.priorLabels ? lpaRetainedVertices(run.priorLabels, run.processed) : [];
+    if (!run.viewFailed) exploreLayer.setRetained(graph, retained);
+    const detail = { context: { graph, s, t, mode, closures }, count, ms, path: route.path, dist: route.dist, time: route.time,
+      trace, uniqueNodes: trace.uniqueNodes(), retained, previous: run.previousRepairRoute };
+    renderRepair(detail);
+    emit('repair:ready', detail);
+  } else if (trace) renderInitialLpa({ count: run.count, uniqueNodes: trace.uniqueNodes() });
   displayRoute(route, run);
 }
 
@@ -217,7 +236,8 @@ function displayRoute(route, run, cancelled = false) {
   const { path, points, failure } = route;
   renderRoute(route);
   renderImpact(route, state.original, route.closures);
-  const previous = samePath(state.original?.path, path) ? null : state.original?.points;
+  const previous = run?.repair ? run.previousRepairRoute
+    : samePath(state.original?.path, path) ? null : state.original?.points;
   if (cancelled) setStatus('Search cancelled · Previous result shown');
   else if (path) setStatus(run?.changed ? 'Route updated' : 'Route found');
   else setStatus('No route available');
@@ -310,13 +330,13 @@ export function initRunController() {
           renderRoute(null, 'Search algorithm changed. Find the route again.');
         }
       }
-      lpaReset(); clearSearch(); renderRepair(null);
+      lpaReset(); clearSearch(); renderInitialLpa(); renderRepair(null);
     }
   });
   on('closures:changed', () => {
     if (!state.route && !state.original && !state.run) return;
     state.original ??= state.route || state.run?.prior || null;
     const repair = !state.run && selectedAlgorithm() === 'lpa' && lpaReady();
-    startRun({ changed: true, repair, visual: repair && !!searchView && !searchView.viewFailed });
+    startRun({ changed: true, repair, visual: repair, animate: repair && !!searchView && !searchView.viewFailed });
   });
 }

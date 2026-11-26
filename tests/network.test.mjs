@@ -8,11 +8,13 @@ import { findChokepoints } from '../js/analysis/chokepoints.js';
 import { CHOKEPOINTS, DEFAULT_START, DEFAULT_END, MAP_CENTER, PLACES, ROADS_URL } from '../js/config.js';
 import { canSearchOnline, cityPlaceIndex, placeGeocoder, geocodedMatches, mergeMatches, placeWords } from '../js/features/geocoding.js';
 import { connectionMessage, noRouteMessage } from '../js/features/route-status.js';
+import { createSearchTrace, playbackCount } from '../js/features/search-trace.js';
 import { blockedEdges, removeClosedRoads } from '../js/graph/closure-filter.js';
 import { roadGeometry, selectRoads } from '../js/graph/closure-selection.js';
 import { buildGraph, decodeRoadGraph, loadGraph, nearestNode, nearestRoadVertex, reverseAdjacency, routeMetrics, snapRouteEndpoints, snapRoutePoint } from '../js/graph/road-graph.js';
 import { heuristic } from '../js/algorithms/common.js';
 import { hav } from '../js/utils/geo.js';
+import { runInSlices } from '../js/utils/work-slices.js';
 import { blockedNode, directions } from '../scripts/osm-driving.mjs';
 
 const data = readFileSync(new URL('../' + ROADS_URL, import.meta.url));
@@ -24,6 +26,48 @@ function finish(search) {
   while (!result.done) result = search.next();
   return result.value;
 }
+
+test('unique nodes count only processed vertices and deduplicate both search directions', () => {
+  const trace = createSearchTrace();
+  assert.equal(trace.uniqueNodes(), 0);
+  trace.record([
+    { u: 0, p: -1, direction: 'forward', found: [2, 99] },
+    { u: 2, p: 0, direction: 'forward', found: [] },
+    { u: 0, p: -1, direction: 'backward', found: [42] },
+    { u: 2, p: -1, direction: 'forward', found: [] },
+    { u: 3, p: 0, direction: 'backward', found: [] }
+  ]);
+  assert.equal(trace.count, 5);
+  assert.deepEqual(trace.directions(), { forward: 3, backward: 2 });
+  assert.equal(trace.uniqueNodes(), 3);
+  assert.deepEqual([4, 2, 0, 3, 1, 5].map(end => trace.uniqueNodes(end)), [2, 2, 0, 2, 1, 3]);
+});
+
+test('recorded bidirectional replay preserves event order, frontier discoveries and the returned route', async () => {
+  const { s, t } = endpoints;
+  const trace = createSearchTrace();
+  const recorded = await runInSlices(ALGORITHMS.bidir.run(graph, s, t, 'fast'), { capture: trace.record });
+  const original = ALGORITHMS.bidir.run(graph, s, t, 'fast');
+  const processed = new Set();
+  let item, n = 0, backward = 0;
+  while (!(item = original.next()).done) {
+    const { u, p, direction, found } = item.value;
+    processed.add(u);
+    const discoveries = [];
+    trace.discoveries(n, node => discoveries.push(node));
+    assert.deepEqual([trace.vertex(n), trace.parent(n), trace.direction(n), discoveries], [u, p, direction, found]);
+    if (direction === 'backward') backward++;
+    n++;
+  }
+  assert.ok(n > 4096, 'the trip crosses a recording chunk boundary');
+  assert.equal(recorded.count, trace.count);
+  assert.equal(trace.uniqueNodes(), processed.size);
+  assert.ok(trace.uniqueNodes() <= trace.count);
+  assert.deepEqual(recorded.value, item.value);
+  assert.deepEqual(trace.directions(), { forward: n - backward, backward });
+  assert.equal(playbackCount(200, n, 8000, 'events'), 200);
+  assert.equal(playbackCount(8000, n, 8000, 'progress'), n);
+});
 
 function assertOptimal(g, s, t, mode, path, baseline) {
   assert.equal(!!path, !!baseline);
@@ -46,6 +90,37 @@ function verifySearches(g, s, t, mode) {
   }
   return baseline;
 }
+
+test('LPA* initial, repair and fresh traces have independent node counts and preserve optimal routes', async () => {
+  const { s, t } = endpoints, mode = 'fast';
+  const { edge: [u, v] } = JSON.parse(readFileSync(new URL('../scripts/presentation-fixture.json', import.meta.url)));
+  const closures = [{ keys: new Set([u * graph.lat.length + v]) }];
+  const disrupted = removeClosedRoads(graph, closures);
+  async function recordedRun(iterator) {
+    const trace = createSearchTrace(), processed = new Set();
+    const { count, value } = await runInSlices(iterator, { capture(events) {
+      trace.record(events);
+      for (const { u } of events) processed.add(u);
+    } });
+    assert.equal(trace.count, count);
+    assert.equal(trace.uniqueNodes(), processed.size);
+    assert.ok(processed.size <= count);
+    return { count, nodes: processed.size, path: value };
+  }
+  try {
+    const initial = await recordedRun(ALGORITHMS.lpa.run(graph, s, t, mode, []));
+    const repair = await recordedRun(lpaRepair(closures));
+    const fresh = await recordedRun(lpaFresh(disrupted, s, t, mode));
+    assert.deepEqual([initial.count, repair.count, fresh.count], [5548, 6180, 11524]);
+    assert.ok(repair.nodes < repair.count, 'repair actually processes some vertices more than once');
+    assertOptimal(graph, s, t, mode, initial.path, finish(ALGORITHMS.dijkstra.run(graph, s, t, mode)));
+    const baseline = finish(ALGORITHMS.dijkstra.run(disrupted, s, t, mode));
+    assertOptimal(disrupted, s, t, mode, repair.path, baseline);
+    assertOptimal(disrupted, s, t, mode, fresh.path, baseline);
+  } finally {
+    lpaReset();
+  }
+});
 
 test('the graph loader retries after a failed road-data request and caches a successful load', async t => {
   let requests = 0;

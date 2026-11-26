@@ -12,7 +12,7 @@ export function initAlgorithmPanel() {
     group.label = label;
     for (const [id, algorithm] of Object.entries(ALGORITHMS)) {
       if (Boolean(algorithm.baseline) !== baseline) continue;
-      group.append(new Option(baseline ? 'Standard Dijkstra (baseline)' : algorithm.name, id));
+      group.append(new Option(algorithm.name, id));
     }
     select.append(group);
   }

@@ -6,19 +6,24 @@ import { nextTask, runInSlices } from '../utils/work-slices.js';
 import { state } from '../state.js';
 import { on } from '../events.js';
 import { $ } from '../utils/dom.js';
-import { costsAgree, renderResults } from '../ui/results-table.js';
+import { costsAgree, matchingRepair, renderResults } from '../ui/results-table.js';
 import { getClosures, getRoutingGraph } from './closures.js';
 import { connectionMessage, noRouteMessage } from './route-status.js';
 import { currentTripGraph, prepareTripRegion } from './routing-region.js';
+import { createSearchTrace, sameSearchContext } from './search-trace.js';
+import { initComparisonReplay } from './comparison-replay.js';
 
-const initialStatus = 'Compare three routing algorithms against the Standard Dijkstra baseline.';
+const initialStatus = 'Compare three routing algorithms against the Dijkstra baseline.';
 
 export function initComparison() {
-  let base, generation = 0;
+  const replay = initComparisonReplay();
+  let base, comparison, generation = 0;
   const statusNode = $('comparisonStatus');
   const status = text => { statusNode.textContent = text; };
   function invalidate() {
     generation++;
+    comparison = undefined;
+    replay.set();
     if (base && $('compareBtn').disabled) status('Outdated comparison discarded. Run a new comparison.');
     else if (statusNode.textContent !== initialStatus) status('Trip settings or closures changed. Run a new comparison.');
     renderResults();
@@ -32,6 +37,11 @@ export function initComparison() {
   on('route:changed', invalidate);
   on('closures:changed', invalidate);
   on('settings:changed', setting => { if (setting === 'cost') invalidate(); });
+  on('workspace:changed', mode => { if (mode !== 'compare') replay.hide(); });
+  on('repair:ready', repair => {
+    if (sameSearchContext(repair.context, comparison)) replay.setRepair(repair);
+  });
+  $('visualize').addEventListener('click', replay.hide);
 
   $('compareBtn').onclick = async () => {
     const prepared = { graph: currentTripGraph() };
@@ -44,7 +54,9 @@ export function initComparison() {
     const { s, t } = snapRouteEndpoints(base, start, end);
     if (s < 0 || t < 0) { status(connectionMessage(snapRoutePoint(base, s < 0 ? start : end).reason)); return; }
     const id = ++generation;
+    comparison = undefined;
     $('compareBtn').disabled = true;
+    replay.set();
     renderResults();
     status('Running comparisons…');
     try {
@@ -58,10 +70,12 @@ export function initComparison() {
         await nextTask();
         if (id !== generation) return;
         const it = (key === 'lpa' ? lpaFresh : algo.run)(graph, s, t, mode);
-        const result = await runInSlices(it, { keepGoing: () => id === generation });
+        const trace = createSearchTrace();
+        const result = await runInSlices(it, { keepGoing: () => id === generation, capture: trace.record });
         if (!result || id !== generation) return;
         const { value: path, count, ms } = result;
-        rows.push({ key, name: algo.name, baseline: algo.baseline, path, count, ms, ...(path && routeMetrics(graph, path)) });
+        rows.push({ key, name: algo.name, baseline: algo.baseline, path, count, ms, trace, uniqueNodes: trace.uniqueNodes(),
+          directions: key === 'bidir' ? trace.directions() : undefined, ...(path && routeMetrics(graph, path)) });
       }
       const baseline = rows.find(row => row.baseline);
       const metric = mode === 'fast' ? 'time' : 'dist';
@@ -74,7 +88,9 @@ export function initComparison() {
           ? (row.path ? 'Cost matches' : 'Unreachable · agrees')
           : `${reachability} · differs`;
       }
-      renderResults(rows, { graph: base, s, t, mode, closures });
+      comparison = { graph: base, s, t, mode, closures };
+      renderResults(rows, comparison);
+      replay.set({ graph: base, start, end, closures, rows }, matchingRepair(comparison));
       const disagreement = rows.some(row => !row.baseline && !row.matches);
       const outcome = disagreement ? 'A result differs from the Dijkstra baseline.'
         : baseline.path ? 'All optimized costs agree.' : noRouteMessage(base, s, t, mode, closures.length > 0);
