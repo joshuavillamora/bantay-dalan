@@ -43,9 +43,9 @@ export function showPreviousRoute(points) {
 }
 
 function drawRoute(points) {
-  pathCase = L.polyline(points, { color: '#fff', weight: 9, opacity: .94, interactive: false });
+  pathCase = L.polyline(points, { className: 'interactive-route', color: '#fff', weight: 9, opacity: .94, interactive: false });
   pathCase.addTo(map);
-  pathLine = L.polyline(points, { color: '#1e4ba8', weight: 5, bubblingMouseEvents: false })
+  pathLine = L.polyline(points, { className: 'interactive-route', color: '#1e4ba8', weight: 5, bubblingMouseEvents: false })
     .bindTooltip(tooltipText('Current route'), { sticky: true });
   pathLine.addTo(map);
   styleRoutes();

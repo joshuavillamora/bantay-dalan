@@ -187,10 +187,12 @@
           <button id="visualize" class="secondary" type="button" disabled>Visualize search</button>
         </div>
         <p class="hint" id="info"></p>
+        <p class="hint" id="initialLpaResult" hidden></p>
         <section class="inset" aria-labelledby="comparison-title">
           <h3 id="comparison-title">Comparison results</h3>
           <p id="comparisonContext" class="hint"></p>
-          <p id="comparisonStatus" class="hint" role="status">Compare three routing algorithms against the Standard Dijkstra baseline.</p>
+          <p id="comparisonStatus" class="hint" role="status">Compare three routing algorithms against the Dijkstra baseline.</p>
+          <button id="compareReplay" class="secondary" type="button" aria-controls="comparisonPlayback" aria-expanded="false" hidden>Replay compared searches</button>
           <div id="resBox" hidden>
             <section id="sharedTotals" class="shared-totals" aria-labelledby="shared-totals-title" hidden>
               <h4 id="shared-totals-title">Route summary</h4>
@@ -214,8 +216,9 @@
         </section>
         <details class="method" id="benchmarkMethod" hidden>
           <summary>About measurements</summary>
-          <p>Each algorithm starts with newly initialized search state on the same endpoints, graph, closures, and routing objective. Compute time excludes shared graph preparation, animation, and drawing. These are single-run browser measurements. Repeated benchmark medians are documented separately.</p>
-          <p>Search events can include repeated processing of a vertex. Optimized costs are checked against Standard Dijkstra for the selected objective. Routes and secondary totals may differ even when optimized costs agree. LPA* incremental repair reuses search state and is evaluated separately from full recalculation.</p>
+          <p>Each algorithm starts with newly initialized search state on the same endpoints, graph, closures, and routing objective. Compute time excludes shared graph preparation, trace aggregation, animation, and drawing. These are single-run browser measurements. Repeated benchmark medians are documented separately.</p>
+          <p id="uniqueNodesHelp">Unique nodes count each processed vertex once per run. Search events count repeat processing. Nodes only discovered or queued are excluded.</p>
+          <p>Optimized costs are checked against Dijkstra for the selected objective. Routes and secondary totals may differ even when optimized costs agree. LPA* incremental repair reuses search state and is evaluated separately from full recalculation.</p>
         </details>
       </div>
       <div class="panel-actions"><button id="compareBtn" class="primary" type="button" disabled>Run comparison</button></div>
@@ -225,6 +228,7 @@
   <main class="map-workspace" aria-label="Map workspace">
     <div class="map-stage">
       <div id="map" role="region" aria-label="World map" aria-describedby="mapKeys"></div>
+      <div id="comparisonMaps" role="region" aria-label="Synchronized search maps" hidden></div>
       <p id="mapKeys" class="sr">Use arrow keys to pan and plus or minus to zoom.</p>
       <div class="map-tools">
         <div class="map-caption">
@@ -272,7 +276,7 @@
         <button id="graphRetry" type="button" class="secondary" hidden>Retry loading roads</button>
       </div>
       <section id="playback" aria-label="Search playback" hidden>
-        <div class="playback-info"><span><b id="sN">0</b> events</span><span id="queueCount" hidden><b id="sQ">0</b> queued</span></div>
+        <div class="playback-info"><span><b id="sN">0</b> events</span><span id="directionCount" hidden></span><span id="queueCount" hidden><b id="sQ">0</b> queued</span></div>
         <div class="playback-speed"><label for="spd">Speed<span class="sr"> of search animation</span></label><input id="spd" type="range" min="0" max="100" value="60"></div>
         <div class="playback-actions">
           <button id="pause" type="button" disabled>Pause</button>
@@ -280,6 +284,37 @@
           <button id="skip" type="button" disabled>Skip</button>
           <button id="reset" type="button">Reset</button>
         </div>
+      </section>
+      <section id="comparisonPlayback" aria-label="Comparative search replay" hidden>
+        <div class="compare-controls">
+          <label>View <select id="compareLayout"><option value="split">Split-screen</option><option value="overlay">Search Overlay</option><option value="focus">Focus</option></select></label>
+          <select id="compareFocus" aria-label="Focused algorithm" hidden></select>
+          <label>Sync <select id="compareSync"><option value="events">Equal event counts</option><option value="progress">Normalized progress</option></select></label>
+          <label>Speed <select id="compareSpeed"><option value="300">Slow</option><option value="1800" selected>Normal</option><option value="10000">Fast</option><option value="40000">Very fast</option></select></label>
+          <button id="compareExit" class="quiet" type="button">Close replay</button>
+        </div>
+        <div class="compare-timeline">
+          <div class="playback-actions">
+            <button id="comparePlay" type="button">Play</button>
+            <button id="compareRestart" type="button">Restart</button>
+            <button id="compareStep" type="button">Step</button>
+          </div>
+          <label>Timeline <input id="compareTimeline" type="range" min="0" max="0" step="1" value="0"></label>
+          <span id="compareReplayStatus" role="status">Playback paused</span>
+        </div>
+        <div id="comparisonTracks" role="group" aria-label="Algorithm visibility, search events and unique nodes"></div>
+        <div class="compare-legend-actions" role="group" aria-label="Search overlay legend controls">
+          <button id="compareShowAll" class="quiet" type="button">Show all</button>
+          <button id="compareHideAll" class="quiet" type="button">Hide all</button>
+          <label>Trace opacity <input id="compareOpacity" type="range" min="10" max="100" value="100"> <output id="compareOpacityValue">100%</output></label>
+          <label><input id="compareRoutes" type="checkbox" checked> Show final routes</label>
+        </div>
+        <p class="hint compare-key">
+          Bidirectional <i class="algorithm-swatch" id="forwardSwatch"></i> forward <i class="algorithm-swatch" id="backwardSwatch"></i> backward ·
+          <i class="swatch dotted"></i> Latest frontier discoveries · <i class="swatch"></i> Final routes · <i class="swatch dashed"></i> Closures.
+          <span id="compareRepairKey" hidden><i class="algorithm-swatch" id="retainedSwatch"></i> Retained LPA* labels · Dashed gray references the route before repair. </span>
+          The timeline shows recorded events, which can include repeat visits.
+        </p>
       </section>
     </div>
   </main>

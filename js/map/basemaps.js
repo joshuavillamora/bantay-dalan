@@ -7,20 +7,22 @@ const osmCredit = '© <a href="https://www.openstreetmap.org/copyright">OpenStre
 const stadiaCredit = '© CNES, Distribution Airbus DS, © Airbus DS, © PlanetObserver (Contains Copernicus Data) · © <a href="https://stadiamaps.com/attribution/">Stadia Maps</a>';
 const modeNames = { streets: 'Streets', satellite: 'Satellite', hybrid: 'Hybrid', offline: 'Offline map', network: 'Network view' };
 
-export function initBasemaps(map) {
-  const container = map.getContainer(), select = $('mapStyle'), source = $('mapSource');
+export function initBasemaps(map, { select = $('mapStyle'), source = $('mapSource'), initial } = {}) {
+  const container = map.getContainer();
   const localImagery = ['localhost', '127.0.0.1'].includes(location.hostname);
-  for (const option of select.options) {
+  for (const option of select?.options ?? []) {
     if (['satellite', 'hybrid'].includes(option.value)) option.disabled = !localImagery;
   }
-  if (!localImagery) select.title = 'Satellite and Hybrid are available on localhost for development.';
+  if (select && !localImagery) select.title = 'Satellite and Hybrid are available on localhost for development.';
   map.attributionControl.addAttribution(osmCredit);
 
   let active = null, pending = null, localBounds, notice = '', renderedPhoto = false, renderedNetwork = false, fallback = true;
-  let desired = OFFLINE_PRESENTATION ? 'offline' : 'streets', disconnected = !navigator.onLine;
+  let desired = initial ?? (OFFLINE_PRESENTATION ? 'offline' : 'streets'), disconnected = !navigator.onLine;
+  let disposed = false;
   const offline = offlineBasemap(map, render);
 
   function render() {
+    if (disposed) return;
     const mode = pending?.mode || active?.mode || desired;
     const hasTiles = active && !active.unavailable;
     const network = desired === 'network';
@@ -36,8 +38,8 @@ export function initBasemaps(map) {
     const status = network ? 'Modeled road network'
       : pending && !local.available ? `Loading ${modeNames[mode].toLowerCase()}…`
       : notice ? `${notice} · ${background}` : background;
-    select.value = desired === 'offline' || disconnected ? desired : mode;
-    if (source.textContent !== status) source.textContent = status;
+    if (select) select.value = desired === 'offline' || disconnected ? desired : mode;
+    if (source && source.textContent !== status) source.textContent = status;
     const photo = !!hasTiles && active.mode !== 'streets';
     container.classList.toggle('has-basemap', !!hasTiles || !!local.available);
     const needed = !network && !local.available && (!hasTiles || !!active?.failed.size);
@@ -145,10 +147,19 @@ export function initBasemaps(map) {
     render();
   }
 
-  select.onchange = () => { desired = select.value; request(desired); };
+  const setMode = mode => { desired = mode; request(mode); };
+  if (select) select.onchange = () => setMode(select.value);
   map.on('moveend', () => queueMicrotask(render));
-  window.addEventListener('offline', () => { disconnected = true; request(desired); });
-  window.addEventListener('online', () => { disconnected = false; request(desired); });
+  const lost = () => { disconnected = true; request(desired); };
+  const restored = () => { disconnected = false; request(desired); };
+  window.addEventListener('offline', lost);
+  window.addEventListener('online', restored);
+  map.once('unload', () => {
+    disposed = true;
+    discard(pending); discard(active); offline.show(false);
+    window.removeEventListener('offline', lost);
+    window.removeEventListener('online', restored);
+  });
   request(desired);
-  return bounds => { localBounds = bounds; render(); };
+  return { setMode, setLocalBounds(bounds) { localBounds = bounds; render(); } };
 }

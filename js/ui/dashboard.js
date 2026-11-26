@@ -14,9 +14,12 @@ export function refreshControls() {
 }
 export const showPlayback = visible => { $('playback').hidden = !visible; };
 export const setStatus = text => { $('lt').textContent = text; };
-export function setCounts(expanded, queued = 0) {
+export function setCounts(expanded, queued = 0, backward) {
   $('sN').textContent = expanded.toLocaleString();
   $('sQ').textContent = queued.toLocaleString();
+  $('directionCount').hidden = backward === undefined;
+  $('directionCount').textContent = backward === undefined ? '' :
+    `${(expanded - backward).toLocaleString()} forward · ${backward.toLocaleString()} backward`;
 }
 export const costName = mode => mode === 'fast' ? 'Estimated fastest' : 'Shortest distance';
 

@@ -7,15 +7,26 @@ export function finishWork(iterator) {
   return result.value;
 }
 
-export async function runInSlices(iterator, { stride = 64, keepGoing = () => true, budget = 8 } = {}) {
+export async function runInSlices(iterator, { stride = 64, keepGoing = () => true, budget = 8, capture } = {}) {
   let result, count = 0, ms = 0, start = performance.now();
+  let deadline = start + budget;
+  const batch = capture ? [] : null;
   while (!(result = iterator.next()).done) {
-    if (++count % stride || performance.now() - start < budget) continue;
-    // Exclude time spent waiting for the browser to process input and paint.
-    ms += performance.now() - start;
-    await nextTask();
-    if (!keepGoing()) return;
+    batch?.push(result.value);
+    if (++count % stride) continue;
+    const now = performance.now();
+    if (!capture && now < deadline) continue;
+    // Recording and time spent yielding to the browser are outside the compute measurement.
+    ms += now - start;
+    if (batch) { capture(batch); batch.length = 0; }
+    if (performance.now() >= deadline) {
+      await nextTask();
+      if (!keepGoing()) return;
+      deadline = performance.now() + budget;
+    }
     start = performance.now();
   }
-  return { value: result.value, count, ms: ms + performance.now() - start };
+  ms += performance.now() - start;
+  if (batch?.length) capture(batch);
+  return { value: result.value, count, ms };
 }

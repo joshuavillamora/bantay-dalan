@@ -11,6 +11,21 @@ export const lpaReset = () => { saved = null; };
 export const lpaReady = () => !!saved && saved.ready;
 export const lpaInfo = () => saved && { g: saved.g, s: saved.s, mode: saved.mode };
 
+// Copy consistent, finite labels from the actual saved search before repair.
+export function lpaSettledLabels() {
+  if (!lpaReady()) return;
+  return saved.G.map((cost, i) => cost === saved.rhs[i] ? cost : Infinity);
+}
+
+export function lpaRetainedVertices(labels, processed) {
+  const kept = new Int32Array(labels.length);
+  let count = 0;
+  for (let i = 0; i < labels.length; i++) {
+    if (!processed[i] && Number.isFinite(labels[i]) && labels[i] === saved.G[i] && labels[i] === saved.rhs[i]) kept[count++] = i;
+  }
+  return kept.subarray(0, count);
+}
+
 function createSearch(g, s, t, mode, closures) {
   const n = g.lat.length, { offsets, vertices, indices } = reverseAdjacency(g), h = heuristic(g, t, mode);
   const st = { g, s, t, mode, n, ready: false,
